@@ -3,6 +3,9 @@
 # Ports: 9060 (Flask), 9061 (PostgreSQL), 9062-9063 (reserved)
 set -e
 
+# macOS gunicorn fork safety fix
+export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 GATEWAY_DIR="$SCRIPT_DIR/gateway"
 

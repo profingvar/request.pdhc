@@ -241,9 +241,41 @@ Results stored in: `./results/2026-03-20T15-00-43Z_results/pytest_output.txt`
 
 ---
 
-## 16–18) Remaining steps — PENDING
+## 16) Git initialisation (1.k–1.l) — DONE
 
-- API key rotation documentation (in readme.md — complete)
-- Server deployment preparation (safe_restart.sh — pending)
-- Git initialisation (pending operator)
-- Docker stack startup test with PostgreSQL (pending `./start.sh` run)
+- Git repository initialised on `main` branch
+- Initial commit: 73 files, 5429 insertions
+- `.env` excluded by `.gitignore` — verified safe
+
+---
+
+## 17) Docker stack test — DONE
+
+- PostgreSQL 16 on port 9061 — healthy
+- Flask-Migrate: `flask db init` + `flask db migrate` + `flask db upgrade` — 5 tables created
+- Gunicorn on port 9060 — running (with `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` for macOS)
+
+### Live endpoint test results
+
+| Endpoint | Expected | Actual |
+|----------|----------|--------|
+| `GET /api/health` | 200 | 200 |
+| `GET /api/v1/metadata` | 200 (CapabilityStatement, FHIR 5.0.0) | 200 |
+| `GET /api/v1/auth/me` | 200 (dev access blob) | 200 |
+| `GET /api/v1/Patient` | 502 (no live IPS in dev) | 502 |
+| `GET /api/v1/CarePlan` | 502 (no live Plan in dev) | 502 |
+| `GET /api/v1/providers` | 502 (no live Plan in dev) | 502 |
+| `POST /api/v1/CarePlan/test/dispatch` (no body) | 400 | 400 |
+| `POST /api/v1/CarePlan/test/dispatch` (missing provider) | 400 | 400 |
+| `GET /` (dashboard) | 200 | 200 |
+| `GET /patients` (web UI) | 200 | 200 |
+| `GET /careplans` (web UI) | 200 | 200 |
+
+All endpoints behave correctly. Upstream proxy calls return 502 as expected without live IPS/Plan backends in dev environment.
+
+---
+
+## 18) Remaining steps — PENDING
+
+- Server deployment preparation (`safe_restart.sh`, nginx config)
+- Transfer procedure per Rule 12 (when deploying to Mac Mini)
