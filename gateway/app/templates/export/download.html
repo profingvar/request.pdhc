@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Export Complete — request.pdhc{% endblock %}
+
+{% block content %}
+<h1>Export Complete</h1>
+<p>Your CSV file has been generated and downloaded.</p>
+<a href="{{ url_for('main.dashboard') }}" class="btn btn-secondary">Back to Dashboard</a>
+{% endblock %}

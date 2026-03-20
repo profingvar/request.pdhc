@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}CarePlan Detail — request.pdhc{% endblock %}
+
+{% block content %}
+<h1>CarePlan Detail</h1>
+
+<div class="card">
+  <table>
+    <tr><th>ID / GUID</th><td>{{ careplan.get('id', '') }}</td></tr>
+    <tr><th>Title</th><td>{{ careplan.get('title', '') }}</td></tr>
+    <tr><th>Status</th><td><span class="badge">{{ careplan.get('status', '') }}</span></td></tr>
+    <tr><th>Subject</th><td>{{ careplan.get('subject', {}).get('reference', '') }}</td></tr>
+    <tr><th>Period Start</th><td>{{ careplan.get('period', {}).get('start', '') }}</td></tr>
+    <tr><th>Period End</th><td>{{ careplan.get('period', {}).get('end', '') }}</td></tr>
+    <tr><th>Description</th><td>{{ careplan.get('description', '') }}</td></tr>
+    <tr><th>Activities</th><td>{{ careplan.get('activity', [])|length }} activity(ies)</td></tr>
+    <tr><th>Goals</th><td>{{ careplan.get('goal', [])|length }} goal(s)</td></tr>
+  </table>
+</div>
+
+<div style="margin-top:1rem; display:flex; gap:0.5rem;">
+  <a href="{{ url_for('careplans_web.readout_careplan', guid=careplan.get('id', '')) }}" class="btn btn-primary">Full Readout</a>
+  <a href="{{ url_for('export_web.preview_export', guid=careplan.get('id', '')) }}" class="btn btn-secondary">Export Preview</a>
+  <a href="{{ url_for('dispatch_web.dispatch_form', guid=careplan.get('id', '')) }}" class="btn btn-success">Dispatch</a>
+  <a href="{{ url_for('careplans_web.list_careplans') }}" class="btn btn-secondary">Back to List</a>
+</div>
+{% endblock %}

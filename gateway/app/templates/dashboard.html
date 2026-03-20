@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — request.pdhc{% endblock %}
+
+{% block content %}
+<h1>request.pdhc Dashboard</h1>
+<p>Unified service for patient management, CarePlan readout, export, and dispatch.</p>
+
+<div class="grid-3" style="margin-top: 1.25rem;">
+  <div class="card">
+    <h3><i data-lucide="users" style="width:1rem;height:1rem"></i> Patients</h3>
+    <p>Create, view, edit, and manage patient records.</p>
+    <a href="{{ url_for('patients_web.list_patients') }}" class="btn btn-primary">Manage Patients</a>
+  </div>
+
+  <div class="card">
+    <h3><i data-lucide="clipboard-list" style="width:1rem;height:1rem"></i> CarePlans</h3>
+    <p>Browse CarePlans, view readouts, and export CSV.</p>
+    <a href="{{ url_for('careplans_web.list_careplans') }}" class="btn btn-primary">View CarePlans</a>
+  </div>
+
+  <div class="card">
+    <h3><i data-lucide="send" style="width:1rem;height:1rem"></i> Dispatch</h3>
+    <p>Dispatch CarePlans to providers with auditable receipts.</p>
+    <a href="{{ url_for('careplans_web.list_careplans') }}" class="btn btn-primary">Select CarePlan</a>
+  </div>
+</div>
+{% endblock %}

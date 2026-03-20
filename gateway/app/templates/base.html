@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}request.pdhc{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/pdhc.css') }}">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <nav>
+    <a class="brand" href="{{ url_for('main.dashboard') }}">request.pdhc</a>
+    <ul class="nav-links">
+      <li><a href="{{ url_for('main.dashboard') }}" {% if request.endpoint == 'main.dashboard' %}class="active"{% endif %}>Dashboard</a></li>
+      <li><a href="{{ url_for('patients_web.list_patients') }}" {% if request.blueprint == 'patients_web' %}class="active"{% endif %}>Patients</a></li>
+      <li><a href="{{ url_for('careplans_web.list_careplans') }}" {% if request.blueprint == 'careplans_web' %}class="active"{% endif %}>CarePlans</a></li>
+      <li class="nav-separator"></li>
+      {% if current_user.is_authenticated %}
+      <li>
+        <form method="POST" action="{{ url_for('auth.logout') }}" style="display:inline">
+          <button type="submit" class="btn btn-sm btn-secondary">Logout</button>
+        </form>
+      </li>
+      {% endif %}
+    </ul>
+  </nav>
+
+  <div class="container-wide">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="flash flash-{{ category }}" role="alert" aria-live="polite">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </div>
+
+  <script>lucide.createIcons();</script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

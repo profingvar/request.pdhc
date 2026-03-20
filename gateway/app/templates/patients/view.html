@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Patient Detail — request.pdhc{% endblock %}
+
+{% block content %}
+<h1>Patient Detail</h1>
+
+{% set names = patient.get('name', []) %}
+{% set name = names[0] if names else {} %}
+
+<div class="card">
+  <table>
+    <tr><th>ID / GUID</th><td>{{ patient.get('id', '') }}</td></tr>
+    <tr><th>Family Name</th><td>{{ name.get('family', '') }}</td></tr>
+    <tr><th>Given Name(s)</th><td>{{ name.get('given', [])|join(' ') }}</td></tr>
+    <tr><th>Gender</th><td>{{ patient.get('gender', '') }}</td></tr>
+    <tr><th>Birth Date</th><td>{{ patient.get('birthDate', '') }}</td></tr>
+    <tr><th>Active</th><td>{{ patient.get('active', '') }}</td></tr>
+    <tr><th>Marital Status</th><td>{{ patient.get('maritalStatus', {}).get('text', '') }}</td></tr>
+    {% for t in patient.get('telecom', []) %}
+    <tr><th>Telecom ({{ t.get('system', '') }})</th><td>{{ t.get('value', '') }}</td></tr>
+    {% endfor %}
+    {% for a in patient.get('address', []) %}
+    <tr><th>Address</th><td>{{ a.get('line', [])|join(', ') }} {{ a.get('city', '') }} {{ a.get('postalCode', '') }}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div style="margin-top:1rem; display:flex; gap:0.5rem;">
+  <a href="{{ url_for('patients_web.edit_patient', guid=patient.get('id', '')) }}" class="btn btn-primary">Edit</a>
+  <form method="POST" action="{{ url_for('patients_web.delete_patient', guid=patient.get('id', '')) }}"
+        onsubmit="return confirm('Delete this patient?')">
+    <button type="submit" class="btn btn-danger">Delete</button>
+  </form>
+  <a href="{{ url_for('patients_web.list_patients') }}" class="btn btn-secondary">Back to List</a>
+</div>
+{% endblock %}

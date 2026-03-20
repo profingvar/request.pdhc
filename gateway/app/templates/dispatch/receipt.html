@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Dispatch Receipt — request.pdhc{% endblock %}
+
+{% block content %}
+<h1>Dispatch Receipt</h1>
+
+{% set receipt = data.get('receipt', {}) %}
+{% set dreq = data.get('dispatch_request', {}) %}
+
+<div class="card">
+  <table>
+    <tr><th>Receipt Token</th><td><code>{{ receipt.get('receipt_token', '') }}</code></td></tr>
+    <tr><th>Status</th><td>
+      {% set st = receipt.get('status', '') %}
+      <span class="badge badge-{% if st == 'accepted' %}success{% elif st == 'error' %}danger{% else %}warning{% endif %}">{{ st }}</span>
+    </td></tr>
+    <tr><th>CarePlan GUID</th><td>{{ dreq.get('careplan_guid', '') }}</td></tr>
+    <tr><th>Provider GUID</th><td>{{ dreq.get('provider_guid', '') }}</td></tr>
+    <tr><th>Dispatch Notes</th><td>{{ dreq.get('dispatch_notes', '') }}</td></tr>
+    <tr><th>Created</th><td>{{ receipt.get('created_at', '') }}</td></tr>
+  </table>
+</div>
+
+<div style="margin-top:1rem;">
+  <a href="{{ url_for('main.dashboard') }}" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+{% endblock %}

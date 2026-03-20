@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}CarePlans — request.pdhc{% endblock %}
+
+{% block content %}
+<h1>CarePlans</h1>
+
+<form method="GET" action="{{ url_for('careplans_web.list_careplans') }}" style="display:flex; gap:0.5rem; margin-bottom:1rem;">
+  <input type="text" name="subject" placeholder="Subject GUID..." value="{{ params.get('subject', '') }}" class="form-control">
+  <select name="status" class="form-control">
+    <option value="">All statuses</option>
+    <option value="active" {% if params.get('status') == 'active' %}selected{% endif %}>Active</option>
+    <option value="completed" {% if params.get('status') == 'completed' %}selected{% endif %}>Completed</option>
+    <option value="draft" {% if params.get('status') == 'draft' %}selected{% endif %}>Draft</option>
+    <option value="revoked" {% if params.get('status') == 'revoked' %}selected{% endif %}>Revoked</option>
+  </select>
+  <button type="submit" class="btn btn-primary">Filter</button>
+</form>
+
+<table>
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Title</th>
+      <th>Status</th>
+      <th>Subject</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for cp in careplans %}
+    <tr>
+      <td>{{ cp.get('id', '') }}</td>
+      <td>{{ cp.get('title', '(untitled)') }}</td>
+      <td>
+        {% set st = cp.get('status', '') %}
+        <span class="badge badge-{% if st == 'active' %}success{% elif st == 'draft' %}warning{% elif st == 'completed' %}info{% else %}secondary{% endif %}">{{ st }}</span>
+      </td>
+      <td>{{ cp.get('subject', {}).get('reference', '') }}</td>
+      <td>
+        <a href="{{ url_for('careplans_web.view_careplan', guid=cp.get('id', '')) }}" class="btn btn-sm btn-primary">View</a>
+        <a href="{{ url_for('careplans_web.readout_careplan', guid=cp.get('id', '')) }}" class="btn btn-sm btn-secondary">Readout</a>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5">No careplans found.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

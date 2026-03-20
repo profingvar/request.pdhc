@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: request_pdhc_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-request_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-request_dev_2026!}
+      POSTGRES_DB: ${POSTGRES_DB:-request_pdhc}
+    ports:
+      - "9061:5432"
+    volumes:
+      - request_pdhc_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-request_admin} -d ${POSTGRES_DB:-request_pdhc}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: request_pdhc_app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-request_admin}:${POSTGRES_PASSWORD:-request_dev_2026!}@db:5432/${POSTGRES_DB:-request_pdhc}
+      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-dev-secret-key}
+      FLASK_ENV: ${FLASK_ENV:-development}
+      FLASK_PORT: "9060"
+      AUTH_DISABLED: ${AUTH_DISABLED:-true}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-key}
+      IPS_BASE_URL: ${IPS_BASE_URL:-https://ips.pdhc.se}
+      PLAN_BASE_URL: ${PLAN_BASE_URL:-https://plan.pdhc.se}
+      SSO_BASE_URL: ${SSO_BASE_URL:-https://sso.pdhc.se}
+      SSO_CALLBACK_URL: ${SSO_CALLBACK_URL:-http://localhost:9060/api/v1/auth/callback}
+      BOOTSTRAP_SU_USERNAME: ${BOOTSTRAP_SU_USERNAME:-admin}
+      BOOTSTRAP_SU_PASSWORD: ${BOOTSTRAP_SU_PASSWORD:-}
+    ports:
+      - "9060:9060"
+    volumes:
+      - ./app:/app/app
+      - ./migrations:/app/migrations
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9060/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  request_pdhc_pgdata:

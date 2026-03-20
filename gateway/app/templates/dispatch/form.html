@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Dispatch CarePlan — request.pdhc{% endblock %}
+
+{% block content %}
+<h1>Dispatch CarePlan</h1>
+<p>CarePlan: <code>{{ careplan_guid }}</code></p>
+
+<div class="card">
+  <form method="POST" action="{{ url_for('dispatch_web.dispatch_form', guid=careplan_guid) }}">
+    <div class="form-group">
+      <label for="provider_guid">Provider</label>
+      <select id="provider_guid" name="provider_guid" class="form-control" required>
+        <option value="">Select provider...</option>
+        {% for p in providers %}
+        <option value="{{ p.get('guid', p.get('id', '')) }}">
+          {{ p.get('name', p.get('display', p.get('guid', ''))) }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="assigned_user_guid">Assigned User (optional)</label>
+      <input type="text" id="assigned_user_guid" name="assigned_user_guid" class="form-control" placeholder="User GUID...">
+    </div>
+    <div class="form-group">
+      <label for="notes">Notes (optional)</label>
+      <textarea id="notes" name="notes" class="form-control" rows="3"></textarea>
+    </div>
+    <div style="display:flex; gap:0.5rem; margin-top:1rem;">
+      <button type="submit" class="btn btn-success">Submit Dispatch</button>
+      <a href="{{ url_for('careplans_web.view_careplan', guid=careplan_guid) }}" class="btn btn-secondary">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
