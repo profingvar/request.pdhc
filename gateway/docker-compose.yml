@@ -39,9 +39,6 @@ services:
       BOOTSTRAP_SU_PASSWORD: ${BOOTSTRAP_SU_PASSWORD:-}
     ports:
       - "9060:9060"
-    volumes:
-      - ./app:/app/app
-      - ./migrations:/app/migrations
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9060/api/health"]
       interval: 10s
