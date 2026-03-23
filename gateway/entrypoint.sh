@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+export FLASK_APP="app:create_app()"
+
 echo "Running database migrations..."
 flask db upgrade || echo "No migrations to apply or migration dir not initialised yet."
 
