@@ -9,6 +9,16 @@ export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 GATEWAY_DIR="$SCRIPT_DIR/gateway"
 
+# Detect docker compose command (v2 plugin or v1 standalone)
+if docker compose version >/dev/null 2>&1; then
+    COMPOSE="docker compose"
+elif command -v docker-compose >/dev/null 2>&1; then
+    COMPOSE="docker-compose"
+else
+    echo "ERROR: Neither 'docker compose' nor 'docker-compose' found."
+    exit 1
+fi
+
 echo "=== request.pdhc startup ==="
 
 # 1. Kill any processes on project ports
@@ -62,7 +72,7 @@ pip install -q -r "$GATEWAY_DIR/requirements.txt"
 # 4. Start Docker services
 echo "Starting Docker services..."
 cd "$GATEWAY_DIR"
-docker compose up -d --build
+$COMPOSE up -d --build
 
 # 5. Wait for health checks
 echo "Waiting for services to be healthy..."
@@ -83,6 +93,6 @@ echo "  App:      http://localhost:9060"
 echo "  Database: localhost:9061"
 echo "  Health:   http://localhost:9060/api/health"
 echo ""
-echo "  Logs:     docker compose -f $GATEWAY_DIR/docker-compose.yml logs -f"
+echo "  Logs:     $COMPOSE -f $GATEWAY_DIR/docker-compose.yml logs -f"
 echo "  Stop:     $SCRIPT_DIR/stop.sh"
 echo ""
