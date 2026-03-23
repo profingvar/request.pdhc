@@ -24,7 +24,9 @@ class Config:
     IPS_BASE_URL = os.environ.get('IPS_BASE_URL', 'https://ips.pdhc.se')
     PLAN_BASE_URL = os.environ.get('PLAN_BASE_URL', 'https://plan.pdhc.se')
     SSO_BASE_URL = os.environ.get('SSO_BASE_URL', 'https://sso.pdhc.se')
-    SSO_CALLBACK_URL = os.environ.get('SSO_CALLBACK_URL', 'http://localhost:9060/auth/callback')
+    SSO_CLIENT_ID = os.environ.get('SSO_CLIENT_ID', '')
+    SSO_CLIENT_SECRET = os.environ.get('SSO_CLIENT_SECRET', '')
+    SSO_CALLBACK_URL = os.environ.get('SSO_CALLBACK_URL', 'http://localhost:9060/api/v1/auth/callback')
 
     # Rate limiting
     RATELIMIT_DEFAULT = os.environ.get('RATELIMIT_DEFAULT', '200 per minute')

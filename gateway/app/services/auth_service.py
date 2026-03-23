@@ -43,8 +43,12 @@ def validate_sso_token(token):
     sso_base = current_app.config['SSO_BASE_URL']
     try:
         resp = requests.get(
-            f"{sso_base}/api/auth/me",
-            headers={'Authorization': f'Bearer {token}'},
+            f"{sso_base}/api/auth/me/service",
+            headers={
+                'Authorization': f'Bearer {token}',
+                'X-SSO-Client-Id': current_app.config['SSO_CLIENT_ID'],
+                'X-SSO-Client-Secret': current_app.config['SSO_CLIENT_SECRET'],
+            },
             timeout=10,
         )
         if resp.status_code == 200:
@@ -106,8 +110,12 @@ def validate_api_key(api_key):
     sso_base = current_app.config['SSO_BASE_URL']
     try:
         resp = requests.get(
-            f"{sso_base}/api/auth/me",
-            headers={'Authorization': f'Bearer {api_key}'},
+            f"{sso_base}/api/auth/me/service",
+            headers={
+                'Authorization': f'Bearer {api_key}',
+                'X-SSO-Client-Id': current_app.config['SSO_CLIENT_ID'],
+                'X-SSO-Client-Secret': current_app.config['SSO_CLIENT_SECRET'],
+            },
             timeout=10,
         )
         if resp.status_code == 200:
