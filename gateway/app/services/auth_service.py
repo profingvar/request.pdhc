@@ -95,6 +95,28 @@ def map_role(access_blob):
     return 'read_only'
 
 
+def validate_api_key(api_key):
+    """Validate an X-API-Key against SSO and return the access blob.
+
+    Provider portals use this for service-to-service authentication.
+    The key is validated by calling SSO's /api/auth/me with Bearer token.
+    """
+    if not api_key:
+        return None
+    sso_base = current_app.config['SSO_BASE_URL']
+    try:
+        resp = requests.get(
+            f"{sso_base}/api/auth/me",
+            headers={'Authorization': f'Bearer {api_key}'},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            return resp.json()
+        return None
+    except requests.RequestException:
+        return None
+
+
 def logout_sso(token):
     """Call SSO logout endpoint."""
     sso_base = current_app.config['SSO_BASE_URL']

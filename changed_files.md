@@ -78,3 +78,13 @@ All edited files are noted here with full path, per Rule 17.
 | 2026-03-20 | `gateway/tests/test_dispatch.py` | Created |
 | 2026-03-20 | `gateway/tests/test_providers.py` | Created |
 | 2026-03-20 | `gateway/tests/test_all_endpoints.py` | Created |
+| 2026-03-20 | `gateway/app/api/requests.py` | Created |
+| 2026-03-20 | `gateway/app/services/request_feed_service.py` | Created |
+| 2026-03-20 | `gateway/tests/test_request_feed.py` | Created |
+| 2026-03-20 | `gateway/app/models/dispatch_models.py` | Modified — added `provider_status`, `provider_status_updated_at`, index on `provider_guid` |
+| 2026-03-20 | `gateway/app/middleware/auth_middleware.py` | Modified — added X-API-Key authentication |
+| 2026-03-20 | `gateway/app/services/auth_service.py` | Modified — added `validate_api_key()` |
+| 2026-03-20 | `gateway/app/api/capability.py` | Modified — added request-feed and status-update operations |
+| 2026-03-20 | `gateway/app/__init__.py` | Modified — registered `requests_bp` blueprint |
+| 2026-03-20 | `gateway/migrations/versions/837810485062_*.py` | Generated — provider_status fields and provider_guid index |
+| 2026-03-20 | `subscription_design copy.md` | Modified — annotated with implementation details |

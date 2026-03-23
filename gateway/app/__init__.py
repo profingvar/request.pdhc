@@ -74,6 +74,9 @@ def create_app(testing=False):
     from app.api.export import export_bp
     app.register_blueprint(export_bp, url_prefix='/api/v1')
 
+    from app.api.requests import requests_bp
+    app.register_blueprint(requests_bp, url_prefix='/api/v1')
+
     from app.api.capability import capability_bp
     app.register_blueprint(capability_bp, url_prefix='/api/v1')
 

@@ -34,7 +34,7 @@ def capability_statement():
                         'display': 'SSO/OAuth token-based authentication',
                     }]
                 }],
-                'description': 'Authentication via SSO (sso.pdhc.se). Supports session and Bearer token.',
+                'description': 'Authentication via SSO (sso.pdhc.se). Supports session, Bearer token, and X-API-Key (service-to-service).',
             },
             'resource': [
                 {
@@ -77,6 +77,25 @@ def capability_statement():
                             'definition': 'POST /api/v1/CarePlan/{id}/export/csv',
                         },
                     ],
+                },
+            ],
+            'operation': [
+                {
+                    'name': 'request-feed',
+                    'definition': 'GET /api/v1/requests?provider_guid={guid}&since={iso-datetime}',
+                    'documentation': (
+                        'Provider subscription feed. Returns dispatched requests '
+                        'filtered by provider_guid with cursor-based pagination. '
+                        'Supports X-API-Key authentication for service-to-service calls.'
+                    ),
+                },
+                {
+                    'name': 'request-status-update',
+                    'definition': 'PUT /api/v1/requests/{request_guid}/status',
+                    'documentation': (
+                        'Provider status callback. Allows provider portals to report '
+                        'acknowledged/in_progress/completed/rejected status back.'
+                    ),
                 },
             ],
         }],

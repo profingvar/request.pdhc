@@ -275,7 +275,26 @@ All endpoints behave correctly. Upstream proxy calls return 502 as expected with
 
 ---
 
-## 18) Remaining steps — PENDING
+## 18) Provider subscription feed (subscription_design) — DONE
+
+Implemented the `request.pdhc` upstream side of the provider subscription design.
+
+### Changes made:
+- **`dispatch_models.py`**: Added `provider_status`, `provider_status_updated_at` fields; added index on `provider_guid`
+- **`auth_middleware.py`**: Added X-API-Key authentication (validates via SSO in prod, mock in dev)
+- **`auth_service.py`**: Added `validate_api_key()` function
+- **`capability.py`**: Added request-feed and request-status-update to CapabilityStatement
+- **`app/api/requests.py`** (NEW): Three endpoints — list feed, single request, status callback
+- **`app/services/request_feed_service.py`** (NEW): Core feed service with cursor pagination, careplan enrichment
+- **`tests/test_request_feed.py`** (NEW): 18 tests
+- **`subscription_design copy.md`**: Annotated Sections 6, 7, 8, and 13 with confirmed implementation details
+- **Migration `837810485062`**: Applied — adds `provider_status`, `provider_status_updated_at`, `ix_dispatch_requests_provider_guid`
+
+### Tests — 76/76 PASSED (58 existing + 18 new)
+
+---
+
+## 19) Remaining steps — PENDING
 
 - Server deployment preparation (`safe_restart.sh`, nginx config)
 - Transfer procedure per Rule 12 (when deploying to Mac Mini)

@@ -27,11 +27,13 @@ class DispatchRequest(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     guid = db.Column(db.String(36), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
     careplan_guid = db.Column(db.String(36), nullable=False)
-    provider_guid = db.Column(db.String(36), nullable=False)
+    provider_guid = db.Column(db.String(36), nullable=False, index=True)
     assigned_user_guid = db.Column(db.String(36), nullable=True)
     dispatch_notes = db.Column(db.Text, nullable=True)
     status = db.Column(db.String(20), nullable=False, default='pending')
     idempotency_key = db.Column(db.String(255), unique=True, nullable=False)
+    provider_status = db.Column(db.String(50), nullable=True)
+    provider_status_updated_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc),
                            onupdate=lambda: datetime.now(timezone.utc))
@@ -46,6 +48,8 @@ class DispatchRequest(db.Model):
             'assigned_user_guid': self.assigned_user_guid,
             'dispatch_notes': self.dispatch_notes,
             'status': self.status,
+            'provider_status': self.provider_status,
+            'provider_status_updated_at': self.provider_status_updated_at.isoformat() if self.provider_status_updated_at else None,
             'idempotency_key': self.idempotency_key,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
