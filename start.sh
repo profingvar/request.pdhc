@@ -83,9 +83,6 @@ echo "  App:      http://localhost:9060"
 echo "  Database: localhost:9061"
 echo "  Health:   http://localhost:9060/api/health"
 echo ""
-echo "Press Ctrl+C to stop..."
-
-# 6. Tail logs; Ctrl+C triggers graceful shutdown
-trap 'echo ""; echo "Shutting down..."; cd "$GATEWAY_DIR" && docker compose down; deactivate 2>/dev/null; echo "Stopped."; exit 0' INT TERM
-
-docker compose logs -f
+echo "  Logs:     docker compose -f $GATEWAY_DIR/docker-compose.yml logs -f"
+echo "  Stop:     $SCRIPT_DIR/stop.sh"
+echo ""
