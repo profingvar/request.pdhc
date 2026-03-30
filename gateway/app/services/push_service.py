@@ -250,28 +250,28 @@ def _push_forms_to_1177(sr, user_guid=None, ip_address=None):
         contract_guid=sr.contract_guid or '',
     )
 
-    push_entries = [{'resource': sr.fhir_resource}]
+    # Ensure the SR has Questionnaires as contained resources
+    # (1177 webhook extracts them from contained, not from Binary Bundle entries)
+    import copy
+    sr_resource = copy.deepcopy(sr.fhir_resource)
+    if 'contained' not in sr_resource:
+        sr_resource['contained'] = []
+
+    existing_q_ids = {
+        r.get('id') for r in sr_resource['contained']
+        if r.get('resourceType') == 'Questionnaire'
+    }
     for srf in forms_with_questionnaire:
-        if not srf.render_ready_snapshot:
-            continue
-        rr_b64 = base64.b64encode(
-            json.dumps(srf.render_ready_snapshot).encode()
-        ).decode()
-        push_entries.append({
-            'resource': {
-                'resourceType': 'Binary',
-                'contentType': 'application/json',
-                'data': rr_b64,
-                'meta': {
-                    'tag': [
-                        {'system': 'https://pdhc.se/forms', 'code': 'form_guid',
-                         'display': srf.form_guid},
-                        {'system': 'https://pdhc.se/forms', 'code': 'render_ready',
-                         'display': srf.display_title or ''},
-                    ],
-                },
-            },
-        })
+        if srf.form_snapshot:
+            q = dict(srf.form_snapshot)
+            q.setdefault('resourceType', 'Questionnaire')
+            q_id = q.get('id', srf.form_guid)
+            # Avoid duplicates (fhir_builder may use questionnaire-{guid} prefix)
+            if q_id not in existing_q_ids and f'questionnaire-{q_id}' not in existing_q_ids:
+                q['id'] = q_id
+                sr_resource['contained'].append(q)
+
+    push_entries = [{'resource': sr_resource}]
 
     push_payload = {
         'resourceType': 'Bundle',
@@ -317,7 +317,12 @@ def _push_forms_to_1177(sr, user_guid=None, ip_address=None):
         action='service_request.push_forms_1177',
         resource_type='ServiceRequest',
         resource_guid=sr.guid,
-        details={'forms_count': len(forms_with_questionnaire), 'result': result.get('status')},
+        details={
+            'forms_count': len(forms_with_questionnaire),
+            'result': result.get('status'),
+            'http_status': result.get('http_status'),
+            'error': result.get('error', result.get('body', '')),
+        },
         ip_address=ip_address,
     )
 
