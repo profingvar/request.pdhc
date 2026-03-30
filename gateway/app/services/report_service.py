@@ -110,5 +110,5 @@ def submit_report(service_request_guid, patient_guid, provider_org_guid,
     return {
         'status': 'recorded',
         'service_request_guid': service_request_guid,
-        'match_status': match.status,
+        'match_status': match.status if match else 'direct',
     }, 200
