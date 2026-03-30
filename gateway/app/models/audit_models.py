@@ -15,6 +15,7 @@ class AuditLog(db.Model):
     resource_guid = db.Column(db.String(36), nullable=True)
     details = db.Column(db.JSON, nullable=True)
     ip_address = db.Column(db.String(45), nullable=True)
+    data_subject_guid = db.Column(db.String(36), nullable=True, index=True)
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     def to_dict(self):
@@ -27,5 +28,6 @@ class AuditLog(db.Model):
             'resource_guid': self.resource_guid,
             'details': self.details,
             'ip_address': self.ip_address,
+            'data_subject_guid': self.data_subject_guid,
             'created_at': self.created_at.isoformat(),
         }

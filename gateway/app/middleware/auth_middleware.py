@@ -4,6 +4,35 @@ from flask_login import current_user
 from app.services.auth_service import get_current_access_blob, map_role, validate_api_key
 
 
+def _check_provider_token():
+    """Check for X-Provider-Token header and validate against PAT store.
+    Sets g.provider_pat, g.provider_org_guid, g.provider_contract_guid.
+    Returns True if valid PAT found, False otherwise."""
+    raw_token = request.headers.get('X-Provider-Token')
+    if not raw_token:
+        return False
+    from app.services.pat_service import validate_pat
+    pat = validate_pat(raw_token)
+    if not pat:
+        return False
+    g.provider_pat = pat
+    g.provider_org_guid = pat.provider_org_guid
+    g.provider_contract_guid = pat.contract_guid
+    g.provider_delivery_mode = pat.delivery_mode
+    from app.services.audit_service import log_event
+    log_event(
+        action='pat.validated',
+        resource_type='ProviderAccessToken',
+        resource_guid=pat.guid,
+        details={
+            'provider_org_guid': pat.provider_org_guid,
+            'endpoint': request.path,
+        },
+        ip_address=request.remote_addr,
+    )
+    return True
+
+
 def _check_api_key():
     """Check for X-API-Key header and validate against SSO.
     Returns the access blob if valid, None otherwise.
@@ -17,23 +46,26 @@ def _check_api_key():
             'email': 'apikey@localhost',
             'user_type': 'service',
             'is_su_admin': False,
-            'provider_guid': request.args.get('provider_guid', ''),
             'effective_phases': ['active'],
-            'organisation_ids': [],
+            'organization_ids': [],
             'groups': [],
         }
     return validate_api_key(api_key)
 
 
 def requires_auth(f):
-    """Require authentication. Accepts session, Bearer token, or X-API-Key.
+    """Require authentication. Accepts session, Bearer token, X-API-Key, or X-Provider-Token.
     In AUTH_DISABLED mode, passes through."""
     @wraps(f)
     def decorated(*args, **kwargs):
         if current_app.config.get('AUTH_DISABLED'):
             return f(*args, **kwargs)
 
-        # Check X-API-Key first (service-to-service)
+        # Check X-Provider-Token first (provider org auth)
+        if _check_provider_token():
+            return f(*args, **kwargs)
+
+        # Check X-API-Key (service-to-service via SSO)
         api_blob = _check_api_key()
         if api_blob:
             g.api_key_access_blob = api_blob
@@ -45,6 +77,42 @@ def requires_auth(f):
             abort(401)
         return f(*args, **kwargs)
     return decorated
+
+
+def requires_provider_token(scope='read'):
+    """Require a valid Provider Access Token with the given scope.
+    Sets g.provider_org_guid from the token record (never from request params)."""
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            if current_app.config.get('AUTH_DISABLED'):
+                g.provider_org_guid = request.args.get('provider_org_guid', 'dev-org')
+                g.provider_contract_guid = request.args.get('contract_guid', 'dev-contract')
+                g.provider_delivery_mode = 'poll'
+                return f(*args, **kwargs)
+
+            if not _check_provider_token():
+                from app.services.audit_service import log_event
+                log_event(
+                    action='pat.rejected',
+                    details={'endpoint': request.path, 'reason': 'invalid_or_missing_token'},
+                    ip_address=request.remote_addr,
+                )
+                return jsonify({
+                    'code': 'unauthenticated',
+                    'message': 'Valid X-Provider-Token header required',
+                }), 401
+
+            pat = g.provider_pat
+            if not pat.has_scope(scope):
+                return jsonify({
+                    'code': 'unauthorized',
+                    'message': f'Token missing required scope: {scope}',
+                }), 403
+
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
 
 
 def requires_role(role):

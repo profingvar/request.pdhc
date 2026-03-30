@@ -18,6 +18,7 @@
       <th>Name</th>
       <th>Gender</th>
       <th>Birth Date</th>
+      <th>Organisation</th>
       <th>Active</th>
       <th>Actions</th>
     </tr>
@@ -35,6 +36,7 @@
       </td>
       <td>{{ patient.get('gender', '') }}</td>
       <td>{{ patient.get('birthDate', '') }}</td>
+      <td>{{ patient.get('managingOrganization', {}).get('display', patient.get('managingOrganization', {}).get('reference', '')|replace('Organization/', '')) }}</td>
       <td>
         {% if patient.get('active', True) %}
           <span class="badge badge-success">Active</span>
@@ -48,7 +50,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="5">No patients found.</td></tr>
+    <tr><td colspan="6">No patients found.</td></tr>
     {% endfor %}
   </tbody>
 </table>

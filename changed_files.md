@@ -88,3 +88,19 @@ All edited files are noted here with full path, per Rule 17.
 | 2026-03-20 | `gateway/app/__init__.py` | Modified — registered `requests_bp` blueprint |
 | 2026-03-20 | `gateway/migrations/versions/837810485062_*.py` | Generated — provider_status fields and provider_guid index |
 | 2026-03-20 | `subscription_design copy.md` | Modified — annotated with implementation details |
+| 2026-03-24 | `gateway/app/routes/service_requests.py` | Updated — added org guard to `create_view` blocking org-less professionals |
+| 2026-03-24 | `gateway/app/models/security_models.py` | Created — ProviderAccessToken (bcrypt-hashed PAT) and DataExchangeGrant (HMAC composite key) models |
+| 2026-03-24 | `gateway/app/services/pat_service.py` | Created — PAT lifecycle: issue, validate, revoke, list |
+| 2026-03-24 | `gateway/app/services/grant_service.py` | Created — HMAC grant lifecycle: issue, validate, use, revoke |
+| 2026-03-24 | `gateway/app/services/provider_feed_service.py` | Created — metadata-only feed listing + FHIR bundle download with auto-grant |
+| 2026-03-24 | `gateway/app/services/report_service.py` | Created — report submission with full composite key validation chain |
+| 2026-03-24 | `gateway/app/api/provider.py` | Created — provider-facing API: feed, download, report, receipt ack |
+| 2026-03-24 | `gateway/app/api/admin_tokens.py` | Created — admin PAT management API: issue, list, revoke |
+| 2026-03-24 | `gateway/app/models/audit_models.py` | Modified — added `data_subject_guid` column (indexed) for GDPR patient tracking |
+| 2026-03-24 | `gateway/app/services/audit_service.py` | Modified — added `data_subject_guid` param, auto-extract from details |
+| 2026-03-24 | `gateway/app/middleware/auth_middleware.py` | Modified — added `_check_provider_token()`, `requires_provider_token()` decorator, PAT auth in `requires_auth` |
+| 2026-03-24 | `gateway/app/services/push_service.py` | Modified — resolves endpoint from PAT records, issues grant before push, adds grant_token in bundle meta |
+| 2026-03-24 | `gateway/app/config.py` | Modified — added HMAC_SECRET, PAT_DEFAULT_EXPIRY_DAYS, PROVIDER_GRANT_EXPIRY_HOURS, PROVIDER_GRANT_MAX_USES, PUSH_TIMEOUT_SECONDS |
+| 2026-03-24 | `gateway/requirements.txt` | Modified — added `bcrypt>=4.1` |
+| 2026-03-24 | `gateway/app/__init__.py` | Modified — registered security_models import, provider_bp and admin_tokens_bp blueprints |
+| 2026-03-25 | `gateway/app/__init__.py` | Modified — enhanced /api/health to return DB status (connected/unavailable) |

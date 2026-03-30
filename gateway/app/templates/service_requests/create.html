@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}New ServiceRequest — request.pdhc{% endblock %}
+
+{% block content %}
+<h1>New ServiceRequest</h1>
+
+<form method="POST" action="{{ url_for('service_requests_web.create_view') }}" style="max-width:40rem;">
+  <div class="form-group">
+    <label for="patient_guid">Patient</label>
+    <select name="patient_guid" id="patient_guid" class="form-control" required>
+      <option value="">-- Select patient --</option>
+      {% for p in patients %}
+        {% set pid = p.get('id', '') %}
+        {% set names = p.get('name', []) %}
+        {% if names %}
+          {% set n = names[0] %}
+          {% set display = n.get('family', '') ~ ', ' ~ n.get('given', [''])|join(' ') %}
+        {% else %}
+          {% set display = pid %}
+        {% endif %}
+        {% set org_ref = p.get('managingOrganization', {}).get('display', '') %}
+        {% if not org_ref %}
+          {% set org_ref = p.get('managingOrganization', {}).get('reference', '')|replace('Organization/', '') %}
+        {% endif %}
+        <option value="{{ pid }}">{{ display }} ({{ p.get('birthDate', '') }}){% if org_ref %} — {{ org_ref }}{% endif %}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="form-group">
+    <label for="plan_definition_guid">PlanDefinition</label>
+    <select name="plan_definition_guid" id="plan_definition_guid" class="form-control" required>
+      <option value="">-- Select PlanDefinition --</option>
+      {% for pd in plandefs %}
+        {% set pdid = pd.get('guid', pd.get('id', '')) %}
+        {% set pdtitle = pd.get('title', pd.get('name', pdid)) %}
+        <option value="{{ pdid }}">{{ pdtitle }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="form-group">
+    <label>Forms (optional)</label>
+    <p style="font-size:0.85em; color:var(--text-muted); margin-bottom:0.4rem;">
+      Select one or more questionnaire forms to attach. Hold Ctrl/Cmd to multi-select.
+    </p>
+    <select name="form_guids" id="form_guids" class="form-control" multiple style="min-height:6rem;">
+      {% for f in forms %}
+        {% set fid = f.get('form_guid', f.get('guid', f.get('id', ''))) %}
+        {% set ftitle = f.get('title', f.get('name', fid)) %}
+        <option value="{{ fid }}">{{ ftitle }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="form-group">
+    <label for="notes">Notes (optional)</label>
+    <textarea name="notes" id="notes" class="form-control" rows="3"></textarea>
+  </div>
+
+  <div style="display:flex; gap:0.5rem; margin-top:1rem;">
+    <button type="submit" class="btn btn-success">Create Draft</button>
+    <a href="{{ url_for('service_requests_web.list_view') }}" class="btn btn-secondary">Cancel</a>
+  </div>
+</form>
+{% endblock %}

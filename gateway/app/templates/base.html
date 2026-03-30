@@ -10,11 +10,15 @@
 </head>
 <body>
   <nav>
-    <a class="brand" href="{{ url_for('main.dashboard') }}">request.pdhc</a>
+    <div style="display:flex;align-items:center;gap:0.6rem;">
+      <a class="brand" href="https://www.pdhc.se/services.html" style="opacity:0.75;font-size:0.85em;">PDHC</a>
+      <span style="color:rgba(255,255,255,0.3);">/</span>
+      <a class="brand" href="{{ url_for('main.dashboard') }}">Request</a>
+    </div>
     <ul class="nav-links">
       <li><a href="{{ url_for('main.dashboard') }}" {% if request.endpoint == 'main.dashboard' %}class="active"{% endif %}>Dashboard</a></li>
       <li><a href="{{ url_for('patients_web.list_patients') }}" {% if request.blueprint == 'patients_web' %}class="active"{% endif %}>Patients</a></li>
-      <li><a href="{{ url_for('careplans_web.list_careplans') }}" {% if request.blueprint == 'careplans_web' %}class="active"{% endif %}>CarePlans</a></li>
+      <li><a href="{{ url_for('service_requests_web.list_view') }}" {% if request.blueprint == 'service_requests_web' %}class="active"{% endif %}>ServiceRequests</a></li>
       <li class="nav-separator"></li>
       {% if current_user.is_authenticated %}
       <li>

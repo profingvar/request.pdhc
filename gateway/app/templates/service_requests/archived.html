@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Archived ServiceRequests — request.pdhc{% endblock %}
+
+{% block content %}
+<h1>Archived ServiceRequests</h1>
+
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+  <form method="GET" action="{{ url_for('service_requests_web.archived_view') }}" style="display:flex; gap:0.5rem;">
+    <select name="status" class="form-control">
+      <option value="">All</option>
+      <option value="archived" {% if status_filter == 'archived' %}selected{% endif %}>Archived</option>
+      <option value="revoked" {% if status_filter == 'revoked' %}selected{% endif %}>Revoked</option>
+    </select>
+    <button type="submit" class="btn btn-primary">Filter</button>
+  </form>
+  <a href="{{ url_for('service_requests_web.list_view') }}" class="btn btn-secondary">Back to active</a>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th>Created</th>
+      <th>Patient</th>
+      <th>PlanDefinition</th>
+      <th>Forms</th>
+      <th>Status</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for sr in items %}
+    <tr>
+      <td>{{ sr.created_at[:10] }}</td>
+      <td>
+        {% set pe = sr.patient_excerpt %}
+        {% if pe and pe.name %}
+          {% set n = pe.name[0] %}
+          {{ n.get('family', '') }}, {{ n.get('given', [''])|join(' ') }}
+        {% else %}
+          {{ sr.patient_guid[:8] }}...
+        {% endif %}
+      </td>
+      <td>
+        {% set snap = sr.plan_definition_snapshot %}
+        {% if snap %}
+          {{ snap.get('title', snap.get('name', sr.plan_definition_guid[:8] ~ '...')) }}
+        {% else %}
+          {{ sr.plan_definition_guid[:8] }}...
+        {% endif %}
+      </td>
+      <td>
+        {% set fc = sr.forms|length if sr.forms else 0 %}
+        {% if fc > 0 %}
+          <span class="badge badge-endorsed">{{ fc }} form{{ 's' if fc != 1 }}</span>
+        {% else %}
+          <span style="color:var(--text-muted);">—</span>
+        {% endif %}
+      </td>
+      <td>
+        <span class="badge badge-secondary">{{ sr.status }}</span>
+      </td>
+      <td>
+        <a href="{{ url_for('service_requests_web.view_detail', guid=sr.guid) }}" class="btn btn-sm btn-primary">View</a>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6">No archived ServiceRequests found.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

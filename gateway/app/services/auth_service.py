@@ -20,7 +20,7 @@ def create_dev_user():
                     'user_type': 'professional',
                     'is_su_admin': True,
                     'effective_phases': ['planning', 'active', 'review'],
-                    'organisation_ids': [],
+                    'organization_ids': [],
                     'groups': [],
                 },
             )
@@ -35,7 +35,7 @@ def initiate_sso_login(next_url, state):
     """Build SSO login redirect URL."""
     sso_base = current_app.config['SSO_BASE_URL']
     callback = current_app.config['SSO_CALLBACK_URL']
-    return f"{sso_base}/auth/login?next={callback}&state={state}&original_next={next_url}"
+    return f"{sso_base}/login?next={callback}&state={state}"
 
 
 def validate_sso_token(token):
@@ -67,7 +67,7 @@ def get_current_access_blob():
             'user_type': 'professional',
             'is_su_admin': True,
             'effective_phases': ['planning', 'active', 'review'],
-            'organisation_ids': [],
+            'organization_ids': [],
             'groups': [],
         }
     return session.get('access_blob')

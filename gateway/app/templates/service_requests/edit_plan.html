@@ -1,0 +1,650 @@
+{% extends "base.html" %}
+{% block title %}Edit PlanDefinition — request.pdhc{% endblock %}
+
+{% block head %}
+<style>
+.builder-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; align-items: start; }
+.builder-col { min-width: 0; }
+.json-preview { position: sticky; top: 4rem; }
+.json-preview pre {
+  background: var(--code-bg, #f5f5f5); border: 1px solid var(--border, #ddd); border-radius: 8px;
+  padding: 1rem; font-size: 0.75rem; line-height: 1.5; overflow: auto;
+  max-height: calc(100vh - 6rem); white-space: pre-wrap; word-break: break-word;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+}
+.item-row {
+  background: var(--bg, #fff); border: 1px solid var(--border, #ddd); border-radius: 6px;
+  padding: 1rem; margin-bottom: 0.75rem; position: relative;
+}
+.item-row .remove-btn {
+  position: absolute; top: 0.5rem; right: 0.5rem; background: none; border: none;
+  color: var(--danger, #c00); cursor: pointer; font-size: 1.2rem; line-height: 1; padding: 0.25rem;
+}
+.item-row .remove-btn:hover { opacity: 0.7; }
+.guid-tag {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.7rem; color: var(--text-muted, #888); display: block; margin-top: 0.1rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sub-section { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border, #ddd); }
+.sub-section h4 { font-size: 0.85rem; font-weight: 600; margin-bottom: 0.5rem; }
+.txn-row {
+  background: var(--card-bg, #fafafa); border: 1px solid var(--border, #ddd); border-radius: 4px;
+  padding: 0.75rem; margin-bottom: 0.5rem; position: relative;
+}
+.form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; }
+@media (max-width: 1024px) {
+  .builder-layout { grid-template-columns: 1fr; }
+  .json-preview { position: static; }
+  .json-preview pre { max-height: 400px; }
+}
+@media (max-width: 768px) {
+  .form-row-3 { grid-template-columns: 1fr; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Edit PlanDefinition Snapshot</h1>
+  <a href="{{ url_for('service_requests_web.view_detail', guid=sr.guid) }}" class="btn btn-secondary btn-sm"><i data-lucide="arrow-left"></i> Back</a>
+</div>
+<p style="margin-bottom:1rem;">ServiceRequest <code>{{ sr.guid[:8] }}...</code> (draft)</p>
+
+<div class="builder-layout">
+  <!-- Column 1: Builder -->
+  <div class="builder-col">
+    <form id="builderForm" method="post" action="{{ url_for('service_requests_web.edit_plan', guid=sr.guid) }}">
+
+      <!-- Metadata -->
+      <div class="card">
+        <h2 class="section-heading">Metadata</h2>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="title">Title</label>
+            <input type="text" id="title" name="title" class="form-control"
+              value="{{ sr.plan_definition_snapshot.title if sr.plan_definition_snapshot else '' }}" oninput="updatePreview()">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="description">Description</label>
+          <textarea id="description" name="description" class="form-control" rows="2" oninput="updatePreview()">{{ sr.plan_definition_snapshot.description if sr.plan_definition_snapshot else '' }}</textarea>
+        </div>
+      </div>
+
+      <!-- Goals -->
+      <div class="card" style="margin-top:1rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+          <h2 class="section-heading" style="margin:0;">Goals</h2>
+          <button type="button" class="btn btn-primary btn-sm" onclick="addGoal()"><i data-lucide="plus"></i> Add Goal</button>
+        </div>
+        <div id="goalsContainer"></div>
+      </div>
+
+      <!-- Actions / Activities -->
+      <div class="card" style="margin-top:1rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+          <h2 class="section-heading" style="margin:0;">Actions (Activities)</h2>
+          <button type="button" class="btn btn-primary btn-sm" onclick="addAction()"><i data-lucide="plus"></i> Add Action</button>
+        </div>
+        <div id="actionsContainer"></div>
+      </div>
+
+      <!-- Hidden fields for goals/actions JSON -->
+      <input type="hidden" id="goalJson" name="goal" value="[]">
+      <input type="hidden" id="actionJson" name="action" value="[]">
+
+      <div style="display:flex; gap:0.5rem; margin-top:1rem;">
+        <button type="submit" class="btn btn-success"><i data-lucide="save"></i> Save Changes</button>
+        <a href="{{ url_for('service_requests_web.view_detail', guid=sr.guid) }}" class="btn btn-secondary">Cancel</a>
+      </div>
+    </form>
+  </div>
+
+  <!-- Column 2: Live FHIR ServiceRequest Preview -->
+  <div class="builder-col json-preview">
+    <div class="card">
+      <h2 class="section-heading">FHIR R5 ServiceRequest Preview</h2>
+      <p style="font-size:0.75rem; color:var(--text-muted,#888); margin-bottom:0.5rem;">ServiceRequest envelope with contained CarePlan</p>
+      <pre id="jsonPreview">Loading...</pre>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Data from server (proxied from plan.pdhc)
+const CONCEPTS = {{ concepts_json | safe }};
+const UNITS = {{ units_json | safe }};
+const VALUESETS = {{ valuesets_json | safe }};
+const EXISTING_GOALS = {{ existing_goals_json | safe }};
+const EXISTING_ACTIONS = {{ existing_actions_json | safe }};
+
+// ServiceRequest context
+const SR_GUID = {{ sr.guid | tojson }};
+const PATIENT_GUID = {{ sr.patient_guid | tojson }};
+const PATIENT_EXCERPT = {{ sr.patient_excerpt | tojson }};
+
+let goalCounter = 0;
+let actionCounter = 0;
+
+// --- Concept dropdown helper ---
+function conceptSelect(name, selectedGuid, extraClass) {
+  let html = `<select name="${name}" class="form-control ${extraClass || ''}" onchange="updatePreview()">`;
+  html += '<option value="">Select concept...</option>';
+  for (const c of CONCEPTS) {
+    const sel = c.guid === selectedGuid ? ' selected' : '';
+    html += `<option value="${c.guid}"${sel}>${c.concept_name}</option>`;
+  }
+  html += '</select>';
+  if (selectedGuid) {
+    html += `<span class="guid-tag">${selectedGuid}</span>`;
+  }
+  return html;
+}
+
+function unitSelect(name, selectedGuid) {
+  let html = `<select name="${name}" class="form-control" onchange="updatePreview()">`;
+  html += '<option value="">No unit</option>';
+  for (const u of UNITS) {
+    const sel = u.guid === selectedGuid ? ' selected' : '';
+    html += `<option value="${u.guid}"${sel}>${u.unit_name}</option>`;
+  }
+  html += '</select>';
+  return html;
+}
+
+// --- Goals ---
+function addGoal(data) {
+  data = data || {};
+  const idx = goalCounter++;
+  const container = document.getElementById('goalsContainer');
+  const div = document.createElement('div');
+  div.className = 'item-row';
+  div.dataset.goalIdx = idx;
+
+  const conceptGuid = data.concept_guid || '';
+  const priority = data.priority || '';
+  const targetType = data.target_type || '';
+
+  div.innerHTML = `
+    <button type="button" class="remove-btn" onclick="this.parentElement.remove(); updatePreview();">&times;</button>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Concept</label>
+        ${conceptSelect('goal_concept_' + idx, conceptGuid, 'goal-concept')}
+      </div>
+      <div class="form-group">
+        <label>Priority</label>
+        <select class="form-control goal-priority" onchange="updatePreview()">
+          <option value="">None</option>
+          <option value="high-priority" ${priority === 'high-priority' ? 'selected' : ''}>High</option>
+          <option value="medium-priority" ${priority === 'medium-priority' ? 'selected' : ''}>Medium</option>
+          <option value="low-priority" ${priority === 'low-priority' ? 'selected' : ''}>Low</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row-3">
+      <div class="form-group">
+        <label>Target Type</label>
+        <select class="form-control goal-target-type" onchange="onTargetTypeChange(this); updatePreview()">
+          <option value="">None</option>
+          <option value="quantity" ${targetType === 'quantity' ? 'selected' : ''}>Quantity</option>
+          <option value="range" ${targetType === 'range' ? 'selected' : ''}>Range</option>
+          <option value="categorical" ${targetType === 'categorical' ? 'selected' : ''}>Categorical</option>
+        </select>
+      </div>
+      <div class="form-group goal-qty-group" ${targetType === 'categorical' ? 'style="display:none"' : ''}>
+        <label>Target Value / Low</label>
+        <input type="number" step="any" class="form-control goal-target-qty" value="${data.target_quantity || data.target_range_low || ''}" oninput="updatePreview()">
+      </div>
+      <div class="form-group goal-cat-group" ${targetType !== 'categorical' ? 'style="display:none"' : ''}>
+        <label>Target Value (from valueset)</label>
+        <select class="form-control goal-cat-value" onchange="updatePreview()">
+          <option value="">Select value...</option>
+        </select>
+      </div>
+      <div class="form-group goal-high-group" ${targetType === 'categorical' ? 'style="display:none"' : ''}>
+        <label>Target High / Operator</label>
+        <input type="text" class="form-control goal-target-high" value="${data.target_range_high || data.target_operator || ''}" oninput="updatePreview()">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group goal-unit-group" ${targetType === 'categorical' ? 'style="display:none"' : ''}>
+        <label>Unit</label>
+        ${unitSelect('goal_unit_' + idx, data.target_unit || '')}
+      </div>
+      <div class="form-group">
+        <label>Categorical Text</label>
+        <input type="text" class="form-control goal-cat-text" value="${data.target_categorical_text || ''}" oninput="updatePreview()">
+      </div>
+    </div>
+  `;
+  container.appendChild(div);
+
+  if (targetType === 'categorical') {
+    populateCatValues(div);
+    if (data.target_categorical_text) {
+      const catSel = div.querySelector('.goal-cat-value');
+      if (catSel) catSel.value = data.target_categorical_text;
+    }
+  }
+
+  lucide.createIcons();
+  updatePreview();
+}
+
+function collectGoals() {
+  const goals = [];
+  document.querySelectorAll('#goalsContainer .item-row').forEach(row => {
+    const conceptSel = row.querySelector('.goal-concept');
+    const concept = CONCEPTS.find(c => c.guid === conceptSel?.value);
+    const targetType = row.querySelector('.goal-target-type')?.value || '';
+
+    const g = {
+      concept_guid: conceptSel?.value || null,
+      concept_name: concept ? concept.concept_name : '',
+      priority: row.querySelector('.goal-priority')?.value || null,
+      target_type: targetType || null,
+    };
+
+    const qtyVal = row.querySelector('.goal-target-qty')?.value;
+    const highVal = row.querySelector('.goal-target-high')?.value;
+    const unitSel = row.querySelector('[name^="goal_unit_"]');
+    const catText = row.querySelector('.goal-cat-text')?.value;
+
+    if (targetType === 'quantity') {
+      g.target_quantity = qtyVal ? parseFloat(qtyVal) : null;
+      g.target_operator = highVal || null;
+    } else if (targetType === 'range') {
+      g.target_range_low = qtyVal ? parseFloat(qtyVal) : null;
+      g.target_range_high = highVal ? parseFloat(highVal) : null;
+    } else if (targetType === 'categorical') {
+      const catValue = row.querySelector('.goal-cat-value')?.value;
+      g.target_categorical_text = catValue || catText || null;
+    }
+
+    if (unitSel?.value) g.target_unit = unitSel.value;
+
+    goals.push(g);
+  });
+  return goals;
+}
+
+// --- Actions ---
+function addAction(data) {
+  data = data || {};
+  const idx = actionCounter++;
+  const container = document.getElementById('actionsContainer');
+  const div = document.createElement('div');
+  div.className = 'item-row';
+  div.dataset.actionIdx = idx;
+  div.dataset.actGuid = data.guid || '';
+
+  const timingType = data.timing_type || '';
+
+  div.innerHTML = `
+    <button type="button" class="remove-btn" onclick="this.parentElement.remove(); updatePreview();">&times;</button>
+    ${data.guid ? `<span class="guid-tag">Activity: ${data.guid}</span>` : ''}
+    <div class="form-row">
+      <div class="form-group">
+        <label>Title *</label>
+        <input type="text" class="form-control action-title" value="${data.title || ''}" oninput="updatePreview()" required>
+      </div>
+      <div class="form-group">
+        <label>Performer</label>
+        <select class="form-control action-performer" onchange="updatePreview()">
+          <option value="">None</option>
+          <option value="Practitioner" ${data.performer_type === 'Practitioner' ? 'selected' : ''}>Practitioner</option>
+          <option value="Patient" ${data.performer_type === 'Patient' ? 'selected' : ''}>Patient</option>
+          <option value="RelatedPerson" ${data.performer_type === 'RelatedPerson' ? 'selected' : ''}>Related Person</option>
+          <option value="Organization" ${data.performer_type === 'Organization' ? 'selected' : ''}>Organization</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Description</label>
+      <textarea class="form-control action-desc" rows="2" oninput="updatePreview()">${data.description || ''}</textarea>
+    </div>
+    <div class="form-row-3">
+      <div class="form-group">
+        <label>Timing</label>
+        <select class="form-control action-timing-type" onchange="updatePreview()">
+          <option value="">None</option>
+          <option value="once" ${timingType === 'once' ? 'selected' : ''}>Once</option>
+          <option value="repeat" ${timingType === 'repeat' ? 'selected' : ''}>Repeat</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Duration of activity</label>
+        <div style="display:flex; gap:0.5rem;">
+          <input type="number" min="1" class="form-control action-duration-value" value="${data.duration_value || ''}" oninput="updatePreview()" style="flex:1;">
+          <select class="form-control action-duration-unit" onchange="updatePreview()" style="flex:1;">
+            <option value="">—</option>
+            <option value="min" ${data.duration_unit === 'min' ? 'selected' : ''}>min</option>
+            <option value="h" ${data.duration_unit === 'h' ? 'selected' : ''}>hours</option>
+            <option value="d" ${data.duration_unit === 'd' ? 'selected' : ''}>days</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Repeats per cycle</label>
+        <input type="number" class="form-control action-timing-freq" value="${data.timing_frequency || ''}" min="1" oninput="updatePreview()">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Repeat cycle</label>
+        <div style="display:flex; gap:0.5rem;">
+          <input type="number" step="any" class="form-control action-timing-period" value="${data.timing_period || ''}" min="1" oninput="updatePreview()" style="flex:1;">
+          <select class="form-control action-timing-unit" onchange="updatePreview()" style="flex:1;">
+            <option value="">—</option>
+            <option value="h" ${data.timing_period_unit === 'h' ? 'selected' : ''}>hours</option>
+            <option value="d" ${data.timing_period_unit === 'd' ? 'selected' : ''}>days</option>
+            <option value="wk" ${data.timing_period_unit === 'wk' ? 'selected' : ''}>weeks</option>
+            <option value="mo" ${data.timing_period_unit === 'mo' ? 'selected' : ''}>months</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="sub-section">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h4>Transactions (Data Points)</h4>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="addTransaction(this.closest('.item-row'), ${idx})"><i data-lucide="plus"></i> Add</button>
+      </div>
+      <div class="txn-container"></div>
+    </div>
+  `;
+  container.appendChild(div);
+
+  if (data.transactions) {
+    data.transactions.forEach(t => addTransaction(div, idx, t));
+  }
+
+  lucide.createIcons();
+  updatePreview();
+}
+
+function addTransaction(actionRow, actionIdx, data) {
+  data = data || {};
+  const container = actionRow.querySelector('.txn-container');
+  const div = document.createElement('div');
+  div.className = 'txn-row';
+
+  div.innerHTML = `
+    <button type="button" class="remove-btn" onclick="this.parentElement.remove(); updatePreview();">&times;</button>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Concept</label>
+        ${conceptSelect('txn_concept_' + actionIdx + '_' + container.children.length, data.concept_guid, 'txn-concept')}
+      </div>
+      <div class="form-group">
+        <label>Requirement</label>
+        <select class="form-control txn-requirement" onchange="updatePreview()">
+          <option value="">None</option>
+          <option value="required" ${data.requirement_type === 'required' ? 'selected' : ''}>Required</option>
+          <option value="recommended" ${data.requirement_type === 'recommended' ? 'selected' : ''}>Recommended</option>
+          <option value="optional" ${data.requirement_type === 'optional' ? 'selected' : ''}>Optional</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row-3">
+      <div class="form-group">
+        <label>Expected Value</label>
+        <input type="text" class="form-control txn-expected" value="${data.expected_value || ''}" oninput="updatePreview()">
+      </div>
+      <div class="form-group">
+        <label>Range Min</label>
+        <input type="number" step="any" class="form-control txn-range-min" value="${data.range_min != null ? data.range_min : ''}" oninput="updatePreview()">
+      </div>
+      <div class="form-group">
+        <label>Range Max</label>
+        <input type="number" step="any" class="form-control txn-range-max" value="${data.range_max != null ? data.range_max : ''}" oninput="updatePreview()">
+      </div>
+    </div>
+  `;
+  container.appendChild(div);
+  updatePreview();
+}
+
+function collectActions() {
+  const actions = [];
+  document.querySelectorAll('#actionsContainer .item-row').forEach(row => {
+    const act = {
+      id: row.dataset.actGuid || undefined,
+      title: row.querySelector('.action-title')?.value || '',
+      description: row.querySelector('.action-desc')?.value || null,
+      performer_type: row.querySelector('.action-performer')?.value || null,
+      timing_type: row.querySelector('.action-timing-type')?.value || null,
+      duration_value: row.querySelector('.action-duration-value')?.value ? parseInt(row.querySelector('.action-duration-value').value) : null,
+      duration_unit: row.querySelector('.action-duration-unit')?.value || null,
+      timing_frequency: row.querySelector('.action-timing-freq')?.value ? parseInt(row.querySelector('.action-timing-freq').value) : null,
+      timing_period: row.querySelector('.action-timing-period')?.value ? parseFloat(row.querySelector('.action-timing-period').value) : null,
+      timing_period_unit: row.querySelector('.action-timing-unit')?.value || null,
+      transactions: [],
+    };
+
+    row.querySelectorAll('.txn-row').forEach(txnRow => {
+      const conceptSel = txnRow.querySelector('.txn-concept');
+      const concept = CONCEPTS.find(c => c.guid === conceptSel?.value);
+      const txn = {
+        concept_guid: conceptSel?.value || null,
+        concept_name: concept ? concept.concept_name : null,
+        requirement_type: txnRow.querySelector('.txn-requirement')?.value || null,
+        expected_value: txnRow.querySelector('.txn-expected')?.value || null,
+        range_min: txnRow.querySelector('.txn-range-min')?.value ? parseFloat(txnRow.querySelector('.txn-range-min').value) : null,
+        range_max: txnRow.querySelector('.txn-range-max')?.value ? parseFloat(txnRow.querySelector('.txn-range-max').value) : null,
+      };
+      act.transactions.push(txn);
+    });
+
+    actions.push(act);
+  });
+  return actions;
+}
+
+// --- FHIR ServiceRequest Preview (client-side) ---
+function buildServiceRequestPreview() {
+  const title = document.getElementById('title').value || '(untitled)';
+  const desc = document.getElementById('description').value;
+
+  // Get patient display name
+  let patientDisplay = 'Unknown';
+  if (PATIENT_EXCERPT && PATIENT_EXCERPT.name && PATIENT_EXCERPT.name.length > 0) {
+    const n = PATIENT_EXCERPT.name[0];
+    const given = (n.given || []).join(' ');
+    const family = n.family || '';
+    patientDisplay = (given + ' ' + family).trim() || 'Unknown';
+  }
+
+  const planDefGuid = {{ sr.plan_definition_guid | tojson }};
+  const requesterGuid = {{ sr.requester_user_guid | tojson }};
+  const requesterOrg = {{ sr.requester_org_guid | tojson }};
+  const contractGuid = {{ (sr.contract_guid or '') | tojson }};
+
+  // --- Build contained CarePlan ---
+  const careplan = {
+    resourceType: 'CarePlan',
+    id: `careplan-${SR_GUID}`,
+    status: 'active',
+    intent: 'plan',
+    title: title,
+    subject: { reference: `Patient/${PATIENT_GUID}`, display: patientDisplay },
+  };
+  if (desc) careplan.description = desc;
+  if (planDefGuid) careplan.instantiatesCanonical = [`PlanDefinition/${planDefGuid}`];
+
+  const contained = [];
+  if (PATIENT_EXCERPT) contained.push(PATIENT_EXCERPT);
+
+  // Goals
+  const goals = collectGoals();
+  const goalRefs = [];
+  goals.forEach((g, idx) => {
+    const concept = CONCEPTS.find(c => c.guid === g.concept_guid);
+    const unit = g.target_unit ? UNITS.find(u => u.guid === g.target_unit) : null;
+    const goalId = `goal-${idx}`;
+
+    const fhirGoal = {
+      resourceType: 'Goal', id: goalId, lifecycleStatus: 'planned',
+      description: { text: concept ? concept.concept_name : g.concept_name || 'Goal' },
+      subject: { reference: `Patient/${PATIENT_GUID}` },
+    };
+    if (g.priority) fhirGoal.priority = { coding: [{ code: g.priority }] };
+    if (g.target_type) {
+      const target = {};
+      if (g.target_type === 'quantity' && g.target_quantity != null) {
+        target.detailQuantity = { value: g.target_quantity };
+        if (unit) target.detailQuantity.unit = unit.unit_name;
+        if (g.target_operator) target.detailQuantity.comparator = g.target_operator;
+      } else if (g.target_type === 'range') {
+        target.detailRange = {};
+        if (g.target_range_low != null) target.detailRange.low = { value: g.target_range_low };
+        if (g.target_range_high != null) target.detailRange.high = { value: g.target_range_high };
+        if (unit) {
+          if (target.detailRange.low) target.detailRange.low.unit = unit.unit_name;
+          if (target.detailRange.high) target.detailRange.high.unit = unit.unit_name;
+        }
+      } else if (g.target_type === 'categorical' && g.target_categorical_text) {
+        target.detailCodeableConcept = { text: g.target_categorical_text };
+      }
+      if (Object.keys(target).length > 0) fhirGoal.target = [target];
+    }
+    contained.push(fhirGoal);
+    goalRefs.push({ reference: `#${goalId}` });
+  });
+  if (goalRefs.length) careplan.goal = goalRefs;
+
+  // Activities
+  const actions = collectActions();
+  if (actions.length > 0) {
+    careplan.activity = actions.map(act => {
+      const detail = { status: 'not-started' };
+      if (act.transactions.length > 0 && act.transactions[0].concept_guid) {
+        const concept = CONCEPTS.find(c => c.guid === act.transactions[0].concept_guid);
+        if (concept) {
+          detail.code = { coding: [{ system: 'https://pdhc.se/concepts', code: act.transactions[0].concept_guid, display: concept.concept_name }], text: act.title };
+        }
+      }
+      if (!detail.code) detail.code = { text: act.title };
+      if (act.description) detail.description = act.description;
+      if (act.performer_type) detail.performer = [{ display: act.performer_type }];
+      if (act.timing_type === 'repeat' && act.timing_frequency) {
+        const repeat = { frequency: act.timing_frequency, period: act.timing_period || 1, periodUnit: act.timing_period_unit || 'd' };
+        if (act.duration_value) { repeat.duration = act.duration_value; repeat.durationUnit = act.duration_unit || 'min'; }
+        detail.scheduledTiming = { repeat };
+      } else if (act.timing_type === 'once' && act.duration_value) {
+        detail.scheduledTiming = { repeat: { duration: act.duration_value, durationUnit: act.duration_unit || 'min' } };
+      }
+      if (goalRefs.length) detail.goal = [...goalRefs];
+      return { detail };
+    });
+  }
+
+  contained.push(careplan);
+
+  // --- Build ServiceRequest envelope ---
+  const resource = {
+    resourceType: 'ServiceRequest',
+    id: SR_GUID,
+    status: 'active',
+    intent: 'order',
+    priority: 'routine',
+    code: { text: title },
+    subject: { reference: `Patient/${PATIENT_GUID}`, display: patientDisplay },
+    requester: { reference: `Practitioner/${requesterGuid}` },
+    authoredOn: new Date().toISOString(),
+    supportingInfo: [{ reference: `#careplan-${SR_GUID}`, display: 'Contained CarePlan' }],
+    contained: contained,
+  };
+
+  if (planDefGuid) resource.instantiatesCanonical = [`PlanDefinition/${planDefGuid}`];
+  if (contractGuid) resource.basedOn = [{ reference: `Contract/${contractGuid}` }];
+  if (requesterOrg) {
+    resource.requester.extension = [{
+      url: 'http://pdhc.se/fhir/StructureDefinition/requester-organization',
+      valueReference: { reference: `Organization/${requesterOrg}` },
+    }];
+  }
+
+  return resource;
+}
+
+function updatePreview() {
+  const resource = buildServiceRequestPreview();
+  document.getElementById('jsonPreview').textContent = JSON.stringify(resource, null, 2);
+
+  // Update hidden form fields
+  document.getElementById('goalJson').value = JSON.stringify(collectGoals());
+  document.getElementById('actionJson').value = JSON.stringify(collectActions());
+}
+
+// Update GUID tags when concept selection changes
+document.addEventListener('change', function(e) {
+  if (e.target.matches('.goal-concept, .txn-concept')) {
+    const guid = e.target.value;
+    const existingTag = e.target.parentElement.querySelector('.guid-tag');
+    if (existingTag) existingTag.remove();
+    if (guid) {
+      const tag = document.createElement('span');
+      tag.className = 'guid-tag';
+      tag.textContent = guid;
+      e.target.parentElement.appendChild(tag);
+    }
+  }
+});
+
+document.addEventListener('input', updatePreview);
+
+// --- Categorical goal helpers ---
+function onTargetTypeChange(sel) {
+  const row = sel.closest('.item-row');
+  const isCat = sel.value === 'categorical';
+  row.querySelector('.goal-qty-group').style.display = isCat ? 'none' : '';
+  row.querySelector('.goal-high-group').style.display = isCat ? 'none' : '';
+  row.querySelector('.goal-unit-group').style.display = isCat ? 'none' : '';
+  row.querySelector('.goal-cat-group').style.display = isCat ? '' : 'none';
+  if (isCat) populateCatValues(row);
+}
+
+function populateCatValues(row) {
+  const conceptSel = row.querySelector('.goal-concept');
+  const catSel = row.querySelector('.goal-cat-value');
+  catSel.innerHTML = '<option value="">Select value...</option>';
+  if (!conceptSel || !conceptSel.value) return;
+  const concept = CONCEPTS.find(c => c.guid === conceptSel.value);
+  if (!concept || !concept.valueset) return;
+  const vs = VALUESETS.find(v => v.guid === concept.valueset);
+  if (!vs || !vs.values) return;
+  vs.values.forEach(v => {
+    const opt = document.createElement('option');
+    opt.value = v.value_name;
+    opt.textContent = v.value_display_text || v.value_name;
+    catSel.appendChild(opt);
+  });
+}
+
+document.addEventListener('change', function(e) {
+  if (e.target.matches('.goal-concept')) {
+    const row = e.target.closest('.item-row');
+    const targetType = row.querySelector('.goal-target-type');
+    if (targetType && targetType.value === 'categorical') {
+      populateCatValues(row);
+    }
+  }
+});
+
+// Init: load existing data
+document.addEventListener('DOMContentLoaded', function() {
+  if (EXISTING_GOALS.length > 0) {
+    EXISTING_GOALS.forEach(g => addGoal(g));
+  }
+  if (EXISTING_ACTIONS.length > 0) {
+    EXISTING_ACTIONS.forEach(a => addAction(a));
+  }
+  updatePreview();
+});
+</script>
+{% endblock %}

@@ -1,20 +1,19 @@
 import requests
 from flask import current_app
-from app.services.auth_service import get_upstream_token
 
 
 def _headers():
-    """Build headers for upstream IPS requests."""
+    """Build headers for upstream IPS requests using service API key."""
     headers = {'Content-Type': 'application/fhir+json', 'Accept': 'application/fhir+json'}
-    token = get_upstream_token()
-    if token:
-        headers['Authorization'] = f'Bearer {token}'
+    api_key = current_app.config.get('IPS_API_KEY')
+    if api_key:
+        headers['Authorization'] = f'ApiKey {api_key}'
     return headers
 
 
 def _ips_url(path=''):
     base = current_app.config['IPS_BASE_URL'].rstrip('/')
-    return f"{base}/api/v1/Patient{path}"
+    return f"{base}/fhir/Patient{path}"
 
 
 def list_patients(params=None):

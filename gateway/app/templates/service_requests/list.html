@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}ServiceRequests — request.pdhc{% endblock %}
+
+{% block content %}
+<h1>ServiceRequests</h1>
+
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+  <form method="GET" action="{{ url_for('service_requests_web.list_view') }}" style="display:flex; gap:0.5rem;">
+    <select name="status" class="form-control">
+      <option value="">All active</option>
+      <option value="draft" {% if status_filter == 'draft' %}selected{% endif %}>Draft</option>
+      <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Active</option>
+    </select>
+    <button type="submit" class="btn btn-primary">Filter</button>
+  </form>
+  <div style="display:flex; gap:0.5rem;">
+    <a href="{{ url_for('service_requests_web.archived_view') }}" class="btn btn-secondary">Archived</a>
+    <a href="{{ url_for('service_requests_web.create_view') }}" class="btn btn-success">+ New ServiceRequest</a>
+  </div>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th>Created</th>
+      <th>Patient</th>
+      <th>PlanDefinition</th>
+      <th>Forms</th>
+      <th>Status</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for sr in items %}
+    <tr>
+      <td>{{ sr.created_at[:10] }}</td>
+      <td>
+        {% set pe = sr.patient_excerpt %}
+        {% if pe and pe.name %}
+          {% set n = pe.name[0] %}
+          {{ n.get('family', '') }}, {{ n.get('given', [''])|join(' ') }}
+        {% else %}
+          {{ sr.patient_guid[:8] }}...
+        {% endif %}
+      </td>
+      <td>
+        {% set snap = sr.plan_definition_snapshot %}
+        {% if snap %}
+          {{ snap.get('title', snap.get('name', sr.plan_definition_guid[:8] ~ '...')) }}
+        {% else %}
+          {{ sr.plan_definition_guid[:8] }}...
+        {% endif %}
+      </td>
+      <td>
+        {% set fc = sr.forms|length if sr.forms else 0 %}
+        {% if fc > 0 %}
+          <span class="badge badge-endorsed">{{ fc }} form{{ 's' if fc != 1 }}</span>
+        {% else %}
+          <span style="color:var(--text-muted);">—</span>
+        {% endif %}
+      </td>
+      <td>
+        {% set st = sr.status %}
+        <span class="badge badge-{% if st == 'active' %}success{% elif st == 'draft' %}warning{% elif st == 'archived' or st == 'revoked' %}secondary{% else %}info{% endif %}">{{ st }}</span>
+      </td>
+      <td style="display:flex; gap:0.5rem; align-items:center;">
+        <a href="{{ url_for('service_requests_web.view_detail', guid=sr.guid) }}" class="btn btn-sm btn-primary">View</a>
+        {% if sr.status in ('active', 'draft') %}
+        <form method="POST" action="{{ url_for('service_requests_web.archive_view', guid=sr.guid) }}" onsubmit="return confirm('Archive this ServiceRequest?');" style="margin:0;">
+          <input type="hidden" name="next" value="list">
+          <button type="submit" class="btn btn-sm btn-secondary">Archive</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6">No ServiceRequests found.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if total > per_page %}
+<div style="margin-top:1rem; display:flex; gap:0.5rem;">
+  {% if page > 1 %}
+  <a href="{{ url_for('service_requests_web.list_view', status=status_filter, page=page-1) }}" class="btn btn-sm btn-secondary">Previous</a>
+  {% endif %}
+  <span style="line-height:2rem;">Page {{ page }} of {{ ((total - 1) // per_page) + 1 }}</span>
+  {% if page * per_page < total %}
+  <a href="{{ url_for('service_requests_web.list_view', status=status_filter, page=page+1) }}" class="btn btn-sm btn-secondary">Next</a>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,414 @@
+{% extends "base.html" %}
+{% block title %}ServiceRequest {{ sr.guid[:8] }} — request.pdhc{% endblock %}
+
+{% block content %}
+<div style="display:flex; justify-content:space-between; align-items:center;">
+  <h1>ServiceRequest
+    <span class="badge badge-{% if sr.status == 'active' %}success{% elif sr.status == 'draft' %}warning{% elif sr.status == 'archived' or sr.status == 'revoked' %}secondary{% else %}info{% endif %}">{{ sr.status }}</span>
+  </h1>
+  <a href="{{ url_for('service_requests_web.list_view') }}" class="btn btn-secondary">Back to list</a>
+</div>
+
+<div class="grid-2" style="margin-top:1rem;">
+  <div class="card">
+    <h3><i data-lucide="user" style="width:1rem;height:1rem"></i> Patient</h3>
+    {% set pe = sr.patient_excerpt %}
+    {% if pe and pe.name %}
+      {% set n = pe.name[0] %}
+      <p><strong>{{ n.get('family', '') }}, {{ n.get('given', [''])|join(' ') }}</strong></p>
+    {% endif %}
+    {% if pe %}
+    <p>Gender: {{ pe.get('gender', '') }} | Birth: {{ pe.get('birthDate', '') }}</p>
+    {% endif %}
+    <p style="font-size:0.85rem; color:var(--text-secondary);">GUID: {{ sr.patient_guid }}</p>
+  </div>
+
+  <div class="card">
+    <h3><i data-lucide="file-text" style="width:1rem;height:1rem"></i> PlanDefinition</h3>
+    {% set snap = sr.plan_definition_snapshot %}
+    {% if snap %}
+    <p><strong>{{ snap.get('title', snap.get('name', '')) }}</strong></p>
+    <p style="font-size:0.85rem;">{{ snap.get('description', '')[:200] }}</p>
+    {% endif %}
+    <p style="font-size:0.85rem; color:var(--text-secondary);">GUID: {{ sr.plan_definition_guid }}</p>
+    {% if sr.status == 'draft' %}
+    <a href="{{ url_for('service_requests_web.edit_plan', guid=sr.guid) }}" class="btn btn-sm btn-secondary">Edit Snapshot</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card" style="margin-top:1rem;">
+  <h3><i data-lucide="clipboard-list" style="width:1rem;height:1rem"></i> Attached Forms</h3>
+  {% if sr_forms %}
+  <table>
+    <thead>
+      <tr>
+        <th>Title</th>
+        <th>Form GUID</th>
+        <th>Version</th>
+        <th>Order</th>
+        <th>Snapshot</th>
+        {% if sr.status == 'draft' %}
+        <th>Actions</th>
+        {% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for f in sr_forms %}
+      <tr>
+        <td>{{ f.display_title or '—' }}</td>
+        <td style="font-size:0.75rem;">{{ f.form_guid[:12] }}...</td>
+        <td>{{ f.form_version or 'latest' }}</td>
+        <td>{{ f.sort_order }}</td>
+        <td>
+          {% if f.form_snapshot %}
+            <a href="{{ url_for('service_requests_web.view_form_detail', guid=sr.guid, form_sr_guid=f.guid) }}" class="btn btn-sm btn-secondary">View</a>
+          {% else %}
+            <span style="color:var(--text-muted);">pending finalize</span>
+          {% endif %}
+        </td>
+        {% if sr.status == 'draft' %}
+        <td>
+          <form method="POST" action="{{ url_for('service_requests_web.remove_form_view', guid=sr.guid, form_sr_guid=f.guid) }}" style="display:inline;">
+            <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Remove this form?')">Remove</button>
+          </form>
+        </td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:var(--text-muted);">No forms attached.</p>
+  {% endif %}
+
+  {% if sr.status == 'draft' and available_forms %}
+  <div style="margin-top:0.75rem; padding-top:0.75rem; border-top:1px solid var(--border);">
+    <form method="POST" action="{{ url_for('service_requests_web.add_form_view', guid=sr.guid) }}" style="display:flex; gap:0.5rem; align-items:end;">
+      <div style="flex:1;">
+        <label for="form_guid" style="font-weight:600; font-size:0.92em;">Add form</label>
+        <select name="form_guid" id="form_guid" class="form-control" required>
+          <option value="">-- Select form --</option>
+          {% for af in available_forms %}
+            {% set afid = af.get('form_guid', af.get('guid', af.get('id', ''))) %}
+            {% set aftitle = af.get('title', af.get('name', afid)) %}
+            <option value="{{ afid }}">{{ aftitle }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary">Attach</button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+
+<div class="card" style="margin-top:1rem;">
+  <h3>Details</h3>
+  <table>
+    <tr><td><strong>GUID</strong></td><td>{{ sr.guid }}</td></tr>
+    <tr><td><strong>Intent</strong></td><td>{{ sr.intent }}</td></tr>
+    <tr><td><strong>Priority</strong></td><td>{{ sr.priority }}</td></tr>
+    <tr><td><strong>Requester</strong></td><td>{{ sr.requester_user_name or '' }}{% if sr.requester_user_name %} {% endif %}<span style="font-size:0.75rem; color:var(--text-muted);">{{ sr.requester_user_guid }}</span></td></tr>
+    <tr><td><strong>Organisation</strong></td><td>{% if sr.requester_org_guid %}{{ sr.requester_org_name or '' }}{% if sr.requester_org_name %} {% endif %}<span style="font-size:0.75rem; color:var(--text-muted);">{{ sr.requester_org_guid }}</span>{% else %}—{% endif %}</td></tr>
+    <tr><td><strong>Contract</strong></td><td>{{ sr.contract_guid or '—' }}</td></tr>
+    <tr><td><strong>Notes</strong></td><td>{{ sr.notes or '—' }}</td></tr>
+    <tr><td><strong>Period</strong></td><td>{{ sr.period_start or '—' }} to {{ sr.period_end or '—' }}</td></tr>
+    <tr><td><strong>Created</strong></td><td>{{ sr.created_at }}</td></tr>
+    <tr><td><strong>Updated</strong></td><td>{{ sr.updated_at }}</td></tr>
+  </table>
+</div>
+
+<div style="display:flex; gap:0.5rem; margin-top:1rem;">
+  {% if sr.status == 'draft' %}
+  <form method="POST" action="{{ url_for('service_requests_web.finalize_view', guid=sr.guid) }}" style="display:inline;">
+    <button type="submit" class="btn btn-success" onclick="return confirm('Finalize this ServiceRequest? It will become active and a FHIR resource will be generated.')">Finalize</button>
+  </form>
+  {% endif %}
+
+  {% if sr.status == 'active' %}
+  <form method="POST" action="{{ url_for('service_requests_web.find_matches_view', guid=sr.guid) }}" style="display:inline;">
+    <button type="submit" class="btn btn-primary">Find Contract Matches</button>
+  </form>
+  <form method="POST" action="{{ url_for('service_requests_web.push_all_view', guid=sr.guid) }}" style="display:inline;">
+    <button type="submit" class="btn btn-success" onclick="return confirm('Push this ServiceRequest to all pending matched providers?')">Push to Providers</button>
+  </form>
+  {% endif %}
+
+  {% if sr.status not in ('archived', 'revoked') %}
+  <form method="POST" action="{{ url_for('service_requests_web.archive_view', guid=sr.guid) }}" style="display:inline;">
+    <button type="submit" class="btn btn-secondary" onclick="return confirm('Archive this ServiceRequest?')">Archive</button>
+  </form>
+  <form method="POST" action="{{ url_for('service_requests_web.revoke_view', guid=sr.guid) }}" style="display:inline;">
+    <button type="submit" class="btn btn-danger" onclick="return confirm('Revoke this ServiceRequest?')">Revoke</button>
+  </form>
+  {% endif %}
+</div>
+
+{# ── Ticket 3: Questionnaire readout (shown once forms have snapshots) ── #}
+{% set snapped_forms = [] %}
+{% for f in sr_forms %}
+  {% if f.form_snapshot %}{% if snapped_forms.append(f) %}{% endif %}{% endif %}
+{% endfor %}
+{% if snapped_forms %}
+<div class="card" style="margin-top:1rem;">
+  <h3><i data-lucide="clipboard-list" style="width:1rem;height:1rem"></i> Questionnaire Readout (dev)</h3>
+  {% for f in snapped_forms %}
+  {% set qs = f.form_snapshot %}
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-top:0.75rem;{% if not loop.first %} border-top:1px solid var(--border); padding-top:0.75rem;{% endif %}">
+
+    {# Left: rendered questions #}
+    <div style="font-size:0.85rem;">
+      <h4 style="margin:0 0 0.5rem;">{{ f.display_title or qs.get('title', qs.get('name', 'Questionnaire')) }}</h4>
+      {% if qs.get('description') %}
+      <p style="color:var(--text-muted); margin-bottom:0.5rem;">{{ qs.description }}</p>
+      {% endif %}
+      <table style="font-size:0.85rem;">
+        <thead><tr><th>#</th><th>Question</th><th>Type</th><th>Required</th></tr></thead>
+        <tbody>
+          {# Macro-like recursive rendering via a flat loop with nesting indication #}
+          {% set ns = namespace(counter=0) %}
+          {% for item in qs.get('item', []) %}
+            {% set ns.counter = ns.counter + 1 %}
+            <tr>
+              <td>{{ ns.counter }}</td>
+              <td>{{ item.get('text', item.get('linkId', '')) }}</td>
+              <td><span class="badge badge-info" style="font-size:0.7rem;">{{ item.get('type', '') }}</span></td>
+              <td>{% if item.get('required') %}Yes{% else %}—{% endif %}</td>
+            </tr>
+            {# One level of nesting #}
+            {% for sub in item.get('item', []) %}
+              {% set ns.counter = ns.counter + 1 %}
+              <tr>
+                <td style="padding-left:1rem;">{{ ns.counter }}</td>
+                <td style="padding-left:1rem;">{{ sub.get('text', sub.get('linkId', '')) }}</td>
+                <td><span class="badge badge-info" style="font-size:0.7rem;">{{ sub.get('type', '') }}</span></td>
+                <td>{% if sub.get('required') %}Yes{% else %}—{% endif %}</td>
+              </tr>
+              {# Second level of nesting #}
+              {% for sub2 in sub.get('item', []) %}
+                {% set ns.counter = ns.counter + 1 %}
+                <tr>
+                  <td style="padding-left:2rem;">{{ ns.counter }}</td>
+                  <td style="padding-left:2rem;">{{ sub2.get('text', sub2.get('linkId', '')) }}</td>
+                  <td><span class="badge badge-info" style="font-size:0.7rem;">{{ sub2.get('type', '') }}</span></td>
+                  <td>{% if sub2.get('required') %}Yes{% else %}—{% endif %}</td>
+                </tr>
+              {% endfor %}
+            {% endfor %}
+          {% endfor %}
+        </tbody>
+      </table>
+      {% if qs.get('item', [])|length == 0 %}
+      <p style="color:var(--text-muted);">No items in this Questionnaire.</p>
+      {% endif %}
+    </div>
+
+    {# Right: raw Questionnaire JSON #}
+    <div>
+      <h4 style="margin:0 0 0.5rem;">Questionnaire JSON</h4>
+      <pre style="font-size:0.7rem; max-height:30rem; overflow:auto; background:var(--code-bg); padding:0.75rem; border-radius:6px; border:1px solid var(--border);">{{ f.form_snapshot | tojson(indent=2) }}</pre>
+    </div>
+
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if sr.fhir_resource %}
+{% set fhir = sr.fhir_resource %}
+<div class="card" style="margin-top:1rem;">
+  <h3><i data-lucide="file-json" style="width:1rem;height:1rem"></i> Provider Delivery Blob (dev)</h3>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-top:0.75rem;">
+
+    {# ── Left: human-readable readout ── #}
+    <div style="font-size:0.85rem;">
+      <h4 style="margin:0 0 0.5rem;">Object Readout</h4>
+      <table style="font-size:0.85rem;">
+        <thead><tr><th>Type</th><th>Name / Display</th><th>GUID</th><th>Lookup</th></tr></thead>
+        <tbody>
+          {# ServiceRequest #}
+          <tr>
+            <td><strong>ServiceRequest</strong></td>
+            <td>{{ fhir.get('code', {}).get('text', '') }}</td>
+            <td style="font-size:0.75rem;">{{ fhir.id }}</td>
+            <td><a href="{{ url_for('service_requests_web.view_detail', guid=fhir.id) }}" class="btn btn-sm btn-secondary" style="padding:0.1rem 0.4rem; font-size:0.75rem;">view</a></td>
+          </tr>
+          {# Patient / subject #}
+          {% set subj = fhir.get('subject', {}) %}
+          {% set patient_id = subj.get('reference', '').replace('Patient/', '') %}
+          <tr>
+            <td><strong>Patient</strong></td>
+            <td>{{ subj.get('display', '') }}</td>
+            <td style="font-size:0.75rem;">{{ patient_id }}</td>
+            <td><a href="https://ips.pdhc.se/patients/{{ patient_id }}" target="_blank" class="btn btn-sm btn-secondary" style="padding:0.1rem 0.4rem; font-size:0.75rem;">IPS</a></td>
+          </tr>
+          {# Requester / Practitioner #}
+          {% set req = fhir.get('requester', {}) %}
+          {% set req_id = req.get('reference', '').replace('Practitioner/', '') %}
+          <tr>
+            <td><strong>Requester</strong></td>
+            <td>{{ sr.requester_user_name or '' }}</td>
+            <td style="font-size:0.75rem;">{{ req_id }}</td>
+            <td><a href="https://sso.pdhc.se/admin/users/{{ req_id }}" target="_blank" class="btn btn-sm btn-secondary" style="padding:0.1rem 0.4rem; font-size:0.75rem;">SSO</a></td>
+          </tr>
+          {# Requester Organisation #}
+          {% set req_org_ext = req.get('extension', []) %}
+          {% set req_org_ref = '' %}
+          {% for ext in req_org_ext %}
+            {% if 'requester-organization' in ext.get('url', '') %}
+              {% set req_org_ref = ext.get('valueReference', {}).get('reference', '').replace('Organization/', '') %}
+            {% endif %}
+          {% endfor %}
+          {% if sr.requester_org_guid %}
+          <tr>
+            <td><strong>Req. Organisation</strong></td>
+            <td>{{ sr.requester_org_name or '' }}</td>
+            <td style="font-size:0.75rem;">{{ sr.requester_org_guid }}</td>
+            <td><a href="https://sso.pdhc.se/admin/organisations/{{ sr.requester_org_guid }}" target="_blank" class="btn btn-sm btn-secondary" style="padding:0.1rem 0.4rem; font-size:0.75rem;">SSO</a></td>
+          </tr>
+          {% endif %}
+          {# PlanDefinition #}
+          {% set pd_refs = fhir.get('instantiatesCanonical', []) %}
+          {% set pd_id = pd_refs[0].replace('PlanDefinition/', '') if pd_refs else '' %}
+          {% if pd_id %}
+          <tr>
+            <td><strong>PlanDefinition</strong></td>
+            <td>{{ (sr.plan_definition_snapshot or {}).get('title', '') }}</td>
+            <td style="font-size:0.75rem;">{{ pd_id }}</td>
+            <td><a href="https://plan.pdhc.se/plan-definitions/{{ pd_id }}" target="_blank" class="btn btn-sm btn-secondary" style="padding:0.1rem 0.4rem; font-size:0.75rem;">Plan</a></td>
+          </tr>
+          {% endif %}
+          {# Contract (basedOn) #}
+          {% set based_on = fhir.get('basedOn', []) %}
+          {% for bo in based_on %}
+            {% set c_id = bo.get('reference', '').replace('Contract/', '') %}
+            <tr>
+              <td><strong>Contract</strong></td>
+              <td>{{ bo.get('display', '') }}</td>
+              <td style="font-size:0.75rem;">{{ c_id }}</td>
+              <td><a href="https://contract.pdhc.se/fhir/Contract/{{ c_id }}" target="_blank" class="btn btn-sm btn-secondary" style="padding:0.1rem 0.4rem; font-size:0.75rem;">Contract</a></td>
+            </tr>
+          {% endfor %}
+          {# Performers (matched providers) #}
+          {% for perf in fhir.get('performer', []) %}
+            {% set p_id = perf.get('reference', '').replace('Organization/', '') %}
+            <tr>
+              <td><strong>Provider</strong></td>
+              <td>{{ perf.get('display', '') }}</td>
+              <td style="font-size:0.75rem;">{{ p_id }}</td>
+              <td><a href="https://sso.pdhc.se/admin/organisations/{{ p_id }}" target="_blank" class="btn btn-sm btn-secondary" style="padding:0.1rem 0.4rem; font-size:0.75rem;">SSO</a></td>
+            </tr>
+          {% endfor %}
+          {# Contained CarePlan #}
+          {% for c in fhir.get('contained', []) %}
+            {% if c.get('resourceType') == 'CarePlan' %}
+            <tr>
+              <td><strong>CarePlan</strong></td>
+              <td>{{ c.get('title', '') }}</td>
+              <td style="font-size:0.75rem;">{{ c.get('id', '') }}</td>
+              <td><span style="color:var(--text-muted); font-size:0.75rem;">contained</span></td>
+            </tr>
+            {% endif %}
+            {% if c.get('resourceType') == 'Goal' %}
+            <tr>
+              <td style="padding-left:1.5rem;">Goal</td>
+              <td>{{ c.get('description', {}).get('text', '') }}</td>
+              <td style="font-size:0.75rem;">{{ c.get('id', '') }}</td>
+              <td><span style="color:var(--text-muted); font-size:0.75rem;">contained</span></td>
+            </tr>
+            {% endif %}
+            {% if c.get('resourceType') == 'Questionnaire' %}
+            <tr>
+              <td><strong>Questionnaire</strong></td>
+              <td>{{ c.get('title', c.get('name', '')) }}</td>
+              <td style="font-size:0.75rem;">{{ c.get('id', '') }}</td>
+              <td>
+                {% set q_guid = c.get('id', '').replace('questionnaire-', '') %}
+                <a href="https://plan.pdhc.se/forms/{{ q_guid }}" target="_blank" class="btn btn-sm btn-secondary" style="padding:0.1rem 0.4rem; font-size:0.75rem;">Plan</a>
+              </td>
+            </tr>
+            {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
+      {# Occurrence period #}
+      {% if fhir.get('occurrencePeriod') %}
+      <p style="margin-top:0.5rem;"><strong>Validity:</strong> {{ fhir.occurrencePeriod.get('start', '—') }} to {{ fhir.occurrencePeriod.get('end', '—') }}</p>
+      {% endif %}
+      {% if fhir.get('note') %}
+      <p><strong>Notes:</strong> {{ fhir.note[0].get('text', '') }}</p>
+      {% endif %}
+    </div>
+
+    {# ── Right: raw JSON ── #}
+    <div>
+      <h4 style="margin:0 0 0.5rem;">Raw FHIR JSON</h4>
+      <pre style="font-size:0.7rem; max-height:40rem; overflow:auto; background:var(--code-bg); padding:0.75rem; border-radius:6px; border:1px solid var(--border);">{{ sr.fhir_resource | tojson(indent=2) }}</pre>
+    </div>
+
+  </div>
+</div>
+{% endif %}
+
+{% if matches %}
+<div class="card" style="margin-top:1rem;">
+  <h3>Contract Matches</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Request</th>
+        <th>Provider</th>
+        <th>Contract</th>
+        <th>Type</th>
+        <th>Status</th>
+        <th>Created</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for m in matches %}
+      <tr>
+        <td style="font-size:0.75rem;">{{ m.service_request_guid }}</td>
+        <td>{{ m.provider_name or '' }}{% if m.provider_name %} {% endif %}<span style="font-size:0.75rem; color:var(--text-muted);">{{ m.provider_org_guid }}</span></td>
+        <td style="font-size:0.75rem;">{{ m.contract_guid }}</td>
+        <td>{{ m.match_type }}</td>
+        <td>
+          <span class="badge badge-{% if m.status == 'accepted' %}success{% elif m.status == 'rejected' %}danger{% elif m.status == 'sent' %}info{% else %}warning{% endif %}">{{ m.status }}</span>
+        </td>
+        <td>{{ m.created_at[:10] }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if receipts %}
+<div class="card" style="margin-top:1rem;">
+  <h3>Delivery Receipts</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Token</th>
+        <th>Method</th>
+        <th>Status</th>
+        <th>Response</th>
+        <th>Created</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in receipts %}
+      <tr>
+        <td style="font-size:0.75rem;">{{ r.receipt_token[:12] }}...</td>
+        <td>{{ r.delivery_method }}</td>
+        <td>
+          <span class="badge badge-{% if r.delivery_status == 'delivered' %}success{% elif r.delivery_status == 'failed' %}danger{% elif r.delivery_status == 'queued' %}info{% else %}warning{% endif %}">{{ r.delivery_status }}</span>
+        </td>
+        <td>{% if r.response_received %}Yes{% else %}Pending{% endif %}</td>
+        <td>{{ r.created_at[:10] }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

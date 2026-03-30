@@ -11,7 +11,7 @@ def capability_statement():
         'resourceType': 'CapabilityStatement',
         'id': 'request-pdhc',
         'url': 'https://request.pdhc.se/api/v1/metadata',
-        'version': '1.0.0',
+        'version': '2.0.0',
         'name': 'RequestPDHCCapabilityStatement',
         'title': 'request.pdhc Unified Service',
         'status': 'active',
@@ -19,7 +19,8 @@ def capability_statement():
         'publisher': 'PDHC',
         'description': (
             'Unified service for patient lifecycle, CarePlan readout/parse/export, '
-            'and CarePlan dispatch operations.'
+            'CarePlan dispatch, FHIR R5 ServiceRequest workflow operations, '
+            'and Questionnaire/Form distribution to external rendering services.'
         ),
         'kind': 'instance',
         'fhirVersion': '5.0.0',
@@ -75,6 +76,121 @@ def capability_statement():
                         {
                             'name': 'export-csv',
                             'definition': 'POST /api/v1/CarePlan/{id}/export/csv',
+                        },
+                    ],
+                },
+                {
+                    'type': 'ServiceRequest',
+                    'profile': 'http://hl7.org/fhir/StructureDefinition/ServiceRequest',
+                    'interaction': [
+                        {'code': 'read'},
+                        {'code': 'search-type'},
+                        {'code': 'create'},
+                    ],
+                    'searchParam': [
+                        {'name': 'status', 'type': 'token'},
+                        {'name': 'page', 'type': 'number'},
+                        {'name': 'per_page', 'type': 'number'},
+                    ],
+                    'operation': [
+                        {
+                            'name': 'update-snapshot',
+                            'definition': 'PUT /api/v1/ServiceRequest/{id}/snapshot',
+                            'documentation': 'Update the editable PlanDefinition snapshot (draft only).',
+                        },
+                        {
+                            'name': 'finalize',
+                            'definition': 'POST /api/v1/ServiceRequest/{id}/finalize',
+                            'documentation': (
+                                'Finalize draft: snapshot attached forms (Questionnaire + render-ready), '
+                                'build FHIR R5 ServiceRequest with contained CarePlan and Questionnaires, '
+                                'set status to active.'
+                            ),
+                        },
+                        {
+                            'name': 'archive',
+                            'definition': 'POST /api/v1/ServiceRequest/{id}/archive',
+                        },
+                        {
+                            'name': 'revoke',
+                            'definition': 'POST /api/v1/ServiceRequest/{id}/revoke',
+                            'documentation': 'Cancel a ServiceRequest. Only if no matches are accepted.',
+                        },
+                        {
+                            'name': 'match',
+                            'definition': 'POST /api/v1/ServiceRequest/{id}/match',
+                            'documentation': 'Find matching contracts from contract.pdhc.',
+                        },
+                        {
+                            'name': 'push',
+                            'definition': 'POST /api/v1/ServiceRequest/{id}/push',
+                            'documentation': (
+                                'Push to all pending matched providers. Bundle includes FHIR ServiceRequest '
+                                'with contained Questionnaires plus render-ready Binary entries for each form.'
+                            ),
+                        },
+                        {
+                            'name': 'push-one',
+                            'definition': 'POST /api/v1/ServiceRequest/{id}/push/{match_guid}',
+                            'documentation': 'Push to a single matched provider.',
+                        },
+                        {
+                            'name': 'list-forms',
+                            'definition': 'GET /api/v1/ServiceRequest/{id}/forms',
+                            'documentation': 'List all forms attached to a ServiceRequest.',
+                        },
+                        {
+                            'name': 'add-form',
+                            'definition': 'POST /api/v1/ServiceRequest/{id}/forms',
+                            'documentation': (
+                                'Attach a form (by form_guid) to a draft ServiceRequest. '
+                                'The form Questionnaire and render-ready JSON are snapshotted on finalize.'
+                            ),
+                        },
+                        {
+                            'name': 'remove-form',
+                            'definition': 'DELETE /api/v1/ServiceRequest/{id}/forms/{form_attachment_guid}',
+                            'documentation': 'Remove an attached form from a draft ServiceRequest.',
+                        },
+                        {
+                            'name': 'reorder-forms',
+                            'definition': 'POST /api/v1/ServiceRequest/{id}/forms/reorder',
+                            'documentation': 'Bulk reorder attached forms (draft only). Body: {ordered_guids: [...]}.',
+                        },
+                        {
+                            'name': 'provider-respond',
+                            'definition': 'POST /api/v1/ServiceRequest/receipt/{token}/respond',
+                            'documentation': 'Provider webhook: accept/reject via receipt token (no auth).',
+                        },
+                    ],
+                },
+                {
+                    'type': 'Questionnaire',
+                    'profile': 'http://hl7.org/fhir/StructureDefinition/Questionnaire',
+                    'documentation': (
+                        'Questionnaire resources are proxied from the Plan service (plan.pdhc.se) '
+                        'form catalogue. Forms are attached to ServiceRequests and their FHIR '
+                        'Questionnaire + render-ready JSON are frozen at finalize time. '
+                        'Contained Questionnaires are delivered inside the push bundle.'
+                    ),
+                    'interaction': [
+                        {'code': 'read'},
+                        {'code': 'search-type'},
+                    ],
+                    'searchParam': [
+                        {'name': 'page', 'type': 'number'},
+                        {'name': 'per_page', 'type': 'number'},
+                    ],
+                    'operation': [
+                        {
+                            'name': 'form-catalogue',
+                            'definition': 'GET /api/v1/Form',
+                            'documentation': 'List available forms from plan.pdhc.se catalogue (proxy).',
+                        },
+                        {
+                            'name': 'form-detail',
+                            'definition': 'GET /api/v1/Form/{form_guid}',
+                            'documentation': 'Get a single form definition from plan.pdhc.se (proxy).',
                         },
                     ],
                 },

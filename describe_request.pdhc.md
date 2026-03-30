@@ -423,14 +423,104 @@ Recommended internal service modules for `request.pdhc`:
 
 ---
 
-## 13) Short Operational Summary
+## 13) FHIR R5 ServiceRequest Workflow
+
+### 13.1 Purpose
+
+The ServiceRequest workflow enables structured ordering of healthcare services by combining a patient excerpt from IPS with an editable PlanDefinition snapshot from Plan, matching against contracts, and pushing to providers with delivery receipts.
+
+### 13.2 Data Model
+
+Three database tables:
+
+- **`service_requests`** — Core entity. Status lifecycle: `draft` → `active` → `completed`/`archived`/`revoked`. Contains patient excerpt (JSON), editable PlanDefinition snapshot (JSON), assembled FHIR R5 resource (JSON), requester user/org, contract reference, validity period.
+- **`service_request_contract_matches`** — Links a ServiceRequest to a matched contract/provider. Tracks match type (`offer`/`push`), status (`pending` → `sent` → `accepted`/`rejected`), and provider response.
+- **`service_request_receipts`** — Delivery proof for pushed ServiceRequests. Contains receipt token (acts as bearer), delivery method/status, and provider response payload.
+
+### 13.3 Workflow Phases
+
+1. **Create (draft)** — User picks a patient (from IPS) and a PlanDefinition (from Plan). System fetches full data, stores patient excerpt and PlanDefinition snapshot. Status: `draft`.
+2. **Edit snapshot** — User can modify the PlanDefinition snapshot (JSON) while in `draft`.
+3. **Finalize** — System builds a FHIR R5 ServiceRequest resource from the model data (patient subject, PlanDef instantiatesCanonical, contract basedOn, contained resources). Status: `draft` → `active`.
+4. **Match contracts** — System queries contract.pdhc for active contracts matching the PlanDefinition scope. Creates match records with provider organisation details.
+5. **Push to providers** — Sends the FHIR resource bundle to matched providers. Creates delivery receipts with unique tokens. If no provider endpoint is configured, queues for provider polling.
+6. **Provider response** — Providers call back via the receipt token webhook to accept/reject. No auth required — the receipt token itself acts as authorization.
+7. **Archive/Revoke** — Archive when period expires or all data received. Revoke cancels (only if no matches are accepted). Auto-archive runs on expired `period_end`.
+
+### 13.4 Organisation-Based Access Control
+
+- SU admin sees all ServiceRequests
+- Regular users see only ServiceRequests from their organisation (`requester_org_guid`)
+- Organisation determined from SSO access blob `organisation_ids`
+
+### 13.5 API Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/v1/ServiceRequest` | read_write | Create draft |
+| GET | `/api/v1/ServiceRequest` | auth | List (org-filtered) |
+| GET | `/api/v1/ServiceRequest/{id}` | auth | Get one |
+| PUT | `/api/v1/ServiceRequest/{id}/snapshot` | read_write | Edit PlanDef snapshot (draft only) |
+| POST | `/api/v1/ServiceRequest/{id}/finalize` | read_write | Build FHIR, set active |
+| POST | `/api/v1/ServiceRequest/{id}/archive` | read_write | Archive |
+| POST | `/api/v1/ServiceRequest/{id}/revoke` | read_write | Cancel (no accepted matches) |
+| GET | `/api/v1/ServiceRequest/{id}/matches` | auth | List contract matches |
+| POST | `/api/v1/ServiceRequest/{id}/match` | read_write | Find matching contracts |
+| POST | `/api/v1/ServiceRequest/{id}/push` | read_write | Push to all pending providers |
+| POST | `/api/v1/ServiceRequest/{id}/push/{match}` | read_write | Push to single provider |
+| GET | `/api/v1/ServiceRequest/{id}/receipts` | auth | List delivery receipts |
+| GET | `/api/v1/ServiceRequest/receipt/{token}` | auth | Lookup receipt |
+| POST | `/api/v1/ServiceRequest/receipt/{token}/respond` | **none** | Provider webhook |
+| POST | `/api/v1/ServiceRequest/auto-archive` | admin | Trigger auto-archive |
+| GET | `/api/v1/PlanDefinition` | auth | Proxy to plan.pdhc |
+| GET | `/api/v1/Contract` | auth | Proxy to contract.pdhc |
+
+### 13.6 FHIR R5 Resource Assembly
+
+The finalized resource includes:
+- `resourceType: ServiceRequest`
+- `subject`: Patient reference + display name
+- `requester`: Practitioner reference + organisation extension
+- `instantiatesCanonical`: PlanDefinition reference
+- `basedOn`: Contract reference (if set)
+- `occurrencePeriod`: Validity period
+- `code.text`: PlanDefinition title
+- `note`: User notes
+- `contained`: Patient excerpt + PlanDefinition snapshot
+
+### 13.7 Service Module Map
+
+```
+app/models/service_request_models.py    — 3 SQLAlchemy models
+app/services/service_request_service.py — CRUD + workflow orchestration
+app/services/fhir_builder_service.py    — FHIR R5 resource assembly
+app/services/match_service.py           — Contract matching logic
+app/services/push_service.py            — Push delivery + receipts
+app/services/plan_definition_service.py — Proxy to plan.pdhc
+app/services/contract_service.py        — Proxy to contract.pdhc
+app/api/service_requests.py             — REST API blueprint
+app/routes/service_requests.py          — Web UI routes
+app/templates/service_requests/         — list, create, view, edit_plan
+```
+
+### 13.8 Upstream Dependencies
+
+- **ips.pdhc** — Patient data (`GET /fhir/Patient/{id}`)
+- **plan.pdhc** — PlanDefinition data (`GET /api/v1/plandefinitions/{id}`)
+- **contract.pdhc** — Contract matching (`GET /fhir/Contract`)
+- **sso.pdhc** — Authentication, access blob with `organisation_ids`, `is_su_admin`
+
+---
+
+## 14) Short Operational Summary
 
 `request.pdhc` is the combined operational API/service surface for:
 
 - creating and managing patients,
 - reading and normalizing careplans into transaction data,
 - exporting operational CSV artifacts,
-- and dispatching careplans to providers with auditable receipts,
+- dispatching careplans to providers with auditable receipts,
+- and creating FHIR R5 ServiceRequests that combine patient data with editable PlanDefinitions, match against contracts, push to providers, and track delivery receipts,
 
 all under one functionally coherent, recode-ready contract.
 

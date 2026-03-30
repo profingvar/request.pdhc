@@ -49,7 +49,9 @@ request.pdhc/
     │   │   ├── __init__.py
     │   │   ├── dispatch_models.py        # DispatchRequest, DispatchReceipt
     │   │   ├── audit_models.py           # AuditLog
-    │   │   └── export_models.py          # ExportRecord
+    │   │   ├── export_models.py          # ExportRecord
+    │   │   ├── service_request_models.py # ServiceRequest, ServiceRequestForm, ContractMatch, Receipt
+    │   │   └── security_models.py        # ProviderAccessToken, DataExchangeGrant
     │   ├── api/
     │   │   ├── __init__.py
     │   │   ├── auth.py                   # SSO proxy auth endpoints
@@ -58,14 +60,18 @@ request.pdhc/
     │   │   ├── dispatch.py               # CarePlan dispatch + receipts
     │   │   ├── providers.py              # Provider directory
     │   │   ├── export.py                 # CSV export endpoints
-    │   │   └── capability.py             # FHIR capability statement
+    │   │   ├── service_requests.py      # ServiceRequest CRUD + form attachment + catalogue proxy
+    │   │   ├── provider.py              # Provider access token management
+    │   │   ├── admin_tokens.py          # Admin token endpoints
+    │   │   └── capability.py             # FHIR capability statement (v2 with Questionnaire)
     │   ├── routes/
     │   │   ├── __init__.py
     │   │   ├── main.py                   # dashboard
     │   │   ├── patients.py               # patient management UI
     │   │   ├── careplans.py              # careplan readout UI
     │   │   ├── dispatch.py               # dispatch workflow UI
-    │   │   └── export.py                 # CSV preview/download UI
+    │   │   ├── export.py                 # CSV preview/download UI
+    │   │   └── service_requests.py      # ServiceRequest + form management UI
     │   ├── services/
     │   │   ├── __init__.py
     │   │   ├── auth_service.py           # SSO token validation, access blob
@@ -75,7 +81,15 @@ request.pdhc/
     │   │   ├── csv_service.py            # transaction rows → CSV
     │   │   ├── dispatch_service.py       # dispatch logic + idempotency
     │   │   ├── provider_service.py       # provider directory lookup
-    │   │   └── audit_service.py          # audit logging
+    │   │   ├── audit_service.py          # audit logging
+    │   │   ├── service_request_service.py # ServiceRequest CRUD + form CRUD
+    │   │   ├── form_service.py           # proxy to plan.pdhc.se form catalogue
+    │   │   ├── fhir_builder_service.py   # FHIR R5 resource assembly (CarePlan + Questionnaires)
+    │   │   ├── push_service.py           # push delivery with render-ready Binary entries
+    │   │   ├── match_service.py          # contract matching
+    │   │   ├── grant_service.py          # HMAC data exchange grants
+    │   │   ├── contract_service.py       # proxy to contract.pdhc.se
+    │   │   └── plan_definition_service.py # proxy to plan.pdhc.se PlanDefinitions
     │   ├── middleware/
     │   │   ├── __init__.py
     │   │   ├── auth_middleware.py         # SSO token check, role enforcement
@@ -99,9 +113,15 @@ request.pdhc/
     │       ├── dispatch/
     │       │   ├── form.html
     │       │   └── receipt.html
-    │       └── export/
-    │           ├── preview.html
-    │           └── download.html
+    │       ├── export/
+    │       │   ├── preview.html
+    │       │   └── download.html
+    │       └── service_requests/
+    │           ├── list.html             # SR table with form count column
+    │           ├── create.html           # patient + PlanDef + form picker
+    │           ├── view.html             # SR detail with attached forms card
+    │           ├── edit_plan.html        # PlanDef snapshot editor
+    │           └── form_detail.html      # Questionnaire + render-ready JSON viewer
     ├── migrations/
     │   └── versions/
     └── tests/
@@ -627,10 +647,11 @@ Each normalized row contains:
 ### 13.1 Capability statement endpoint
 
 - **13.a** Implement `gateway/app/api/capability.py`:
-  - `GET /api/v1/metadata` — returns FHIR R5 CapabilityStatement describing all supported resources and operations:
+  - `GET /api/v1/metadata` — returns FHIR R5 CapabilityStatement (v2.0.0) describing all supported resources and operations:
     - Patient: read, search, create, update, delete
-    - CarePlan: read, search
-    - CarePlan dispatch: custom operation
+    - CarePlan: read, search, dispatch, export-csv
+    - ServiceRequest: read, search, create, finalize, archive, revoke, match, push, form CRUD (list/add/remove/reorder)
+    - Questionnaire: read, search (proxied from plan.pdhc.se form catalogue via `/api/v1/Form`)
     - Provider: search
   - Include supported search parameters per resource.
   - Include security description (SSO/token-based).
@@ -659,8 +680,11 @@ Each normalized row contains:
   - Parse/export (preview, CSV download).
   - Dispatch (submit, status check).
   - Provider directory (list).
-  - Capability statement (metadata).
+  - Capability statement (metadata — verify Questionnaire resource present).
   - Audit query (admin).
+  - ServiceRequest lifecycle (create draft, add forms, edit snapshot, finalize, match, push, archive, revoke).
+  - Form attachment CRUD (list forms, add form, remove form, reorder forms).
+  - Form catalogue proxy (list forms, get form detail).
 - **14.b** Script logs results with timestamps and stores in `./results/<timestamp>_results/` (Rule 11).
 - **14.c** Run the full endpoint test script. Update `progress.md`.
 
@@ -817,7 +841,8 @@ Kill targets before startup: ports 9060–9063 (previous run).
 |---------------|--------------------------|----------------------------------|
 | SSO           | `https://sso.pdhc.se`    | Authentication, access blobs     |
 | IPS           | `https://ips.pdhc.se`    | Patient/IPS data (FHIR R5)      |
-| PlanDef       | `https://plan.pdhc.se`   | CarePlan/PlanDef data (FHIR R5) |
+| Plan          | `https://plan.pdhc.se`   | PlanDefinitions, Form catalogue, FHIR Questionnaire production, render-ready JSON |
+| Contract      | `https://contract.pdhc.se` | Provider contracts for matching |
 
 ---
 
@@ -834,3 +859,216 @@ Kill targets before startup: ports 9060–9063 (previous run).
 | 500  | Internal error                             |
 
 All errors include machine-readable `code` + human-readable `message`. FHIR routes additionally return `OperationOutcome` when applicable.
+
+---
+
+## Phase 3 — Form Distribution (Questionnaire Requests)
+
+### Overview
+
+The Plan service (`plan.pdhc.se`) now produces FHIR R5 Questionnaire resources from its form builder. This phase extends request.pdhc to distribute one or more forms alongside (or instead of) CarePlans, using the same lifecycle: draft → finalize → match → push, with identical timing, IPS, contract, grant, and receipt semantics.
+
+**Key principle:** A ServiceRequest already wraps a PlanDefinition. Forms are an additional axis — a request can carry 0..* forms. The existing ServiceRequest lifecycle, contract matching, push delivery, grant issuance, and receipt tracking are reused wholesale.
+
+---
+
+### Step 1 — New model: `ServiceRequestForm`
+
+Add a linking table between ServiceRequest and forms from the Plan catalogue.
+
+**File:** `gateway/app/models/service_request_models.py`
+
+```
+ServiceRequestForm
+├── guid                      (PK, UUID)
+├── service_request_guid      (FK → service_requests.guid, NOT NULL)
+├── form_guid                 (UUID, from plan.pdhc.se form catalogue)
+├── form_version              (String, nullable — defaults to latest)
+├── form_snapshot             (JSON — cached Questionnaire resource at finalize)
+├── render_ready_snapshot     (JSON — cached render-ready payload at finalize)
+├── display_title             (String — human label from form catalogue)
+├── sort_order                (Integer — ordering within the request)
+├── created_at / updated_at
+```
+
+**Index:** `(service_request_guid, form_guid)` unique — same form cannot be added twice to one request.
+
+**Migration:** New Alembic migration `add_service_request_forms_table.py`.
+
+---
+
+### Step 2 — Extend Plan service proxy: `form_service.py`
+
+New service file `gateway/app/services/form_service.py` to proxy the Plan catalogue.
+
+| Function | Upstream call | Purpose |
+|----------|--------------|---------|
+| `list_forms(params)` | `GET /api/v1/forms` | Paginated form catalogue for picker UI |
+| `get_form(guid)` | `GET /api/v1/forms/{guid}` | Single form definition (latest version) |
+| `get_form_version(guid, version)` | `GET /api/v1/forms/{guid}/versions` | Specific version |
+| `get_questionnaire(guid)` | `POST /api/v1/forms/produce` or `GET /api/v1/form-definitions/{guid}/questionnaire` | FHIR Questionnaire JSON |
+| `get_render_ready(guid)` | `GET /api/v1/form-definitions/{guid}/render-ready` | Render-ready JSON for external renderer |
+
+Auth: uses the same `PLAN_BASE_URL` + service API key already configured.
+
+---
+
+### Step 3 — Extend ServiceRequest service for form attachment
+
+**File:** `gateway/app/services/service_request_service.py` — add:
+
+| Function | Behaviour |
+|----------|-----------|
+| `add_form_to_request(sr_guid, form_guid, form_version, sort_order, user_guid, ip)` | Validates SR is `draft`. Calls `form_service.get_form()` to populate `display_title`. Creates `ServiceRequestForm` row. Audit log. |
+| `remove_form_from_request(sr_guid, form_sr_guid, user_guid, ip)` | Validates SR is `draft`. Deletes the `ServiceRequestForm` row. |
+| `reorder_forms(sr_guid, ordered_guids, user_guid, ip)` | Bulk-update `sort_order`. |
+| `list_forms_for_request(sr_guid)` | Returns ordered list of attached forms. |
+
+**On finalize** (existing `finalize_service_request`):
+- For each attached `ServiceRequestForm`, fetch and cache:
+  - `form_snapshot` ← `form_service.get_questionnaire(form_guid)` (FHIR Questionnaire)
+  - `render_ready_snapshot` ← `form_service.get_render_ready(form_guid)` (render-ready JSON)
+- This freezes the form content at point-of-issue, just like `plan_definition_snapshot`.
+
+---
+
+### Step 4 — Extend FHIR builder for Questionnaire containment
+
+**File:** `gateway/app/services/fhir_builder_service.py`
+
+Update `build_service_request_resource(sr_model)`:
+
+- For each `ServiceRequestForm` attached to the SR:
+  - Include the `form_snapshot` (Questionnaire) as an additional `contained` resource
+  - Add a `supportingInfo` reference: `Reference(Questionnaire/{form_guid})`
+- The final FHIR bundle sent to providers will therefore contain:
+  ```
+  ServiceRequest
+  ├── contained[0]: CarePlan (existing)
+  ├── contained[1]: Questionnaire/form-guid-1 (new)
+  ├── contained[2]: Questionnaire/form-guid-2 (new)
+  └── supportingInfo: [#form-guid-1, #form-guid-2]
+  ```
+
+---
+
+### Step 5 — Extend push payload
+
+**File:** `gateway/app/services/push_service.py`
+
+The push bundle already wraps `fhir_resource` which will now contain the Questionnaires (via Step 4). Additionally:
+
+- For each form, include a **second bundle entry** with the `render_ready_snapshot` so the receiving rendering service can use either the FHIR Questionnaire or the render-ready JSON:
+  ```json
+  {
+    "resourceType": "Bundle",
+    "type": "message",
+    "entry": [
+      { "resource": "<ServiceRequest with contained Questionnaires>" },
+      { "resource": { "resourceType": "Binary", "contentType": "application/json",
+                       "data": "<base64 render-ready JSON>",
+                       "meta": { "tag": [{"code": "form_guid", "display": "<guid>"}] }
+                     }
+      }
+    ],
+    "meta": {
+      "tag": [
+        {"code": "receipt_token", "display": "<receipt_uuid>"},
+        {"code": "grant_token", "display": "<grant_token>"}
+      ]
+    }
+  }
+  ```
+- The grant already covers the SR+patient+provider+contract scope — forms ride the same grant, no new grant type needed.
+
+---
+
+### Step 6 — API endpoints
+
+**File:** `gateway/app/api/service_requests.py` — add under the existing ServiceRequest blueprint:
+
+| Method | Endpoint | Purpose | Auth |
+|--------|----------|---------|------|
+| GET | `/ServiceRequest/<guid>/forms` | List attached forms | Yes |
+| POST | `/ServiceRequest/<guid>/forms` | Attach a form (`{form_guid, form_version?, sort_order?}`) | Yes, read_write |
+| DELETE | `/ServiceRequest/<guid>/forms/<form_sr_guid>` | Remove a form | Yes, read_write |
+| POST | `/ServiceRequest/<guid>/forms/reorder` | Bulk reorder (`{ordered_guids: [...]}`) | Yes, read_write |
+
+No new blueprint needed — these nest cleanly under the existing `/api/v1/ServiceRequest` namespace.
+
+Also add a catalogue proxy:
+
+| Method | Endpoint | Purpose | Auth |
+|--------|----------|---------|------|
+| GET | `/Form` | Proxy `plan.pdhc.se/api/v1/forms` catalogue | Yes |
+| GET | `/Form/<guid>` | Proxy single form detail | Yes |
+
+---
+
+### Step 7 — Web UI
+
+All templates follow the PDHC Design System (`../css_instrux/repo_css.md`): 12px base font, system font stack, PDHC colour tokens (`--primary`, `--success`, `--warning`, `--danger`, `--border`, etc.), `.card` pattern with `1px solid var(--border)` and subtle shadow, horizontal-only table borders with `--code-bg` header rows, pill badges for form status, `0.92em`/`600` labels, Lucide icons at `1rem`, and `base.html` extension. Page-specific styles go in `<style>` blocks within the template — no separate CSS files.
+
+**Templates to modify:**
+
+| Template | Changes |
+|----------|---------|
+| `create.html` | Add multi-select form picker (populated from `/api/v1/Form` proxy). Each selected form shows title + version badge. |
+| `view.html` | Add "Attached Forms" card between PlanDefinition card and matches table. Shows form title, version, sort order. If finalized, link to view cached Questionnaire JSON. |
+| `edit_plan.html` | Add form management section: add/remove/reorder forms while in draft. |
+| `list.html` | Add "Forms" column showing count of attached forms (e.g. "2 forms"). |
+
+**New template:**
+| Template | Purpose |
+|----------|---------|
+| `service_requests/forms.html` | Optional detail view for a single attached form's FHIR Questionnaire + render-ready JSON (read-only viewer). |
+
+**Route additions** in `gateway/app/routes/service_requests.py`:
+
+| Route | Method | Purpose |
+|-------|--------|---------|
+| `/service-requests/<guid>/add-form` | POST | Attach form (from picker) |
+| `/service-requests/<guid>/remove-form/<form_guid>` | POST | Remove form |
+| `/service-requests/<guid>/form/<form_guid>` | GET | View form detail |
+
+---
+
+### Step 8 — Configuration
+
+**File:** `gateway/app/config.py`
+
+No new upstream URL needed — forms live on `PLAN_BASE_URL` which is already configured. Add:
+
+```python
+FORM_SNAPSHOT_ON_FINALIZE = True   # cache Questionnaire + render-ready on finalize
+```
+
+---
+
+### Step 9 — Migration & deployment checklist
+
+1. Write Alembic migration for `service_request_forms` table
+2. Add `form_service.py`
+3. Extend `service_request_service.py` with form CRUD
+4. Extend `fhir_builder_service.py` for Questionnaire containment
+5. Extend `push_service.py` for render-ready Binary entries
+6. Add API endpoints
+7. Add web UI routes + templates
+8. Run migration: `flask db upgrade`
+9. Test: create SR → attach 2 forms → finalize → verify FHIR resource contains Questionnaires → push → verify bundle includes render-ready payloads
+10. No changes to grant, receipt, match, or contract logic — forms inherit the existing security and delivery model
+
+---
+
+### What stays the same
+
+| Concern | Reuse |
+|---------|-------|
+| Contract matching | Unchanged — matches are per-ServiceRequest, not per-form |
+| Push delivery | Same endpoint, same receipt tokens, same grant tokens |
+| Grant issuance | Same HMAC scope (SR + patient + provider + contract) |
+| Receipt tracking | Same receipt model — one receipt per push, not per form |
+| Auto-archive | Same `period_end` logic on the ServiceRequest |
+| Audit logging | Same `audit_service.log_event` calls |
+| Auth middleware | Same `requires_auth` + role checks |
+| Provider webhook | Same `/receipt/<token>/respond` — provider accepts/rejects the whole request |
