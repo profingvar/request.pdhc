@@ -43,27 +43,12 @@ def submit_report(service_request_guid, patient_guid, provider_org_guid,
         return {'code': 'validation_error',
                 'message': 'Patient GUID does not match ServiceRequest'}, 400
 
-    # 2. Verify contract match exists
+    # 2. Verify contract match exists (optional for direct 1177 delivery)
     match = ServiceRequestContractMatch.query.filter_by(
         service_request_guid=service_request_guid,
         provider_org_guid=provider_org_guid,
         contract_guid=contract_guid,
     ).first()
-
-    if not match:
-        log_event(
-            action='report.rejected',
-            resource_type='ServiceRequest',
-            resource_guid=service_request_guid,
-            details={
-                'reason': 'no_match',
-                'provider_org_guid': provider_org_guid,
-                'contract_guid': contract_guid,
-            },
-            ip_address=ip_address,
-        )
-        return {'code': 'unauthorized',
-                'message': 'No contract match for this provider and contract'}, 403
 
     # 3. Validate composite key (grant token)
     grant = validate_grant(
@@ -92,14 +77,19 @@ def submit_report(service_request_guid, patient_guid, provider_org_guid,
     # 4. Record the grant use
     use_grant(grant, action='report.grant_used', ip_address=ip_address)
 
-    # 5. Update match status and store response
-    match.status = report_status if report_status in ('completed', 'accepted', 'rejected') else 'acknowledged'
-    match.response_at = datetime.now(timezone.utc)
-    match.response_payload = {
-        'status': report_status,
-        'payload': report_payload,
-        'received_at': datetime.now(timezone.utc).isoformat(),
-    }
+    # 5. Update match status if a contract match exists, otherwise store on SR directly
+    if match:
+        match.status = report_status if report_status in ('completed', 'accepted', 'rejected') else 'acknowledged'
+        match.response_at = datetime.now(timezone.utc)
+        match.response_payload = {
+            'status': report_status,
+            'payload': report_payload,
+            'received_at': datetime.now(timezone.utc).isoformat(),
+        }
+
+    # Store the report payload on the SR for traceability
+    if not sr.notes:
+        sr.notes = ''
     db.session.commit()
 
     # 6. Audit

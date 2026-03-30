@@ -77,7 +77,7 @@ def report(sr_guid):
     if not body:
         return jsonify({'code': 'bad_request', 'message': 'JSON body required'}), 400
 
-    required = ['patient_guid', 'contract_guid', 'organisation_guid', 'grant_token']
+    required = ['patient_guid', 'organisation_guid', 'grant_token']
     missing = [f for f in required if not body.get(f)]
     if missing:
         return jsonify({
