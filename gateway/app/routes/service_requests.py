@@ -165,6 +165,15 @@ def create_view():
     else:
         plandefs = plandefs_data if isinstance(plandefs_data, list) else []
 
+    # Fetch full PlanDefinition data (with fhir_data/actions) for each
+    plandefs_full = {}
+    for pd in plandefs:
+        guid = pd.get('guid', pd.get('id', ''))
+        if guid:
+            full_data, st = plan_definition_service.get_plan_definition(guid)
+            if st == 200:
+                plandefs_full[guid] = full_data
+
     # Fetch forms catalogue from Plan
     forms_data, _ = form_service.list_forms()
     if isinstance(forms_data, dict):
@@ -172,8 +181,10 @@ def create_view():
     else:
         forms_list = forms_data if isinstance(forms_data, list) else []
 
+    import json
     return render_template('service_requests/create.html',
-                           patients=patients, plandefs=plandefs, forms=forms_list)
+                           patients=patients, plandefs=plandefs, forms=forms_list,
+                           plandefs_full_json=json.dumps(plandefs_full))
 
 
 @service_requests_web_bp.route('/service-requests/<guid>')

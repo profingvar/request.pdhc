@@ -39,11 +39,12 @@
     </select>
   </div>
 
-  <div class="form-group">
-    <label>Forms (optional)</label>
+  <div class="form-group" id="forms-group">
+    <label>Forms</label>
     <p style="font-size:0.85em; color:var(--text-muted); margin-bottom:0.4rem;">
-      Select one or more questionnaire forms to attach. Hold Ctrl/Cmd to multi-select.
+      Forms from the selected PlanDefinition are auto-selected. You can also add extra forms.
     </p>
+    <div id="plandef-forms" style="margin-bottom:0.5rem;"></div>
     <select name="form_guids" id="form_guids" class="form-control" multiple style="min-height:6rem;">
       {% for f in forms %}
         {% set fid = f.get('form_guid', f.get('guid', f.get('id', ''))) %}
@@ -63,4 +64,55 @@
     <a href="{{ url_for('service_requests_web.list_view') }}" class="btn btn-secondary">Cancel</a>
   </div>
 </form>
+
+<script>
+const PLANDEFS_FULL = {{ plandefs_full_json | safe }};
+
+document.getElementById('plan_definition_guid').addEventListener('change', function() {
+  const guid = this.value;
+  const formSelect = document.getElementById('form_guids');
+  const infoDiv = document.getElementById('plandef-forms');
+
+  // Clear previous selections and info
+  Array.from(formSelect.options).forEach(opt => opt.selected = false);
+  infoDiv.innerHTML = '';
+
+  if (!guid || !PLANDEFS_FULL[guid]) return;
+
+  const pd = PLANDEFS_FULL[guid];
+
+  // Extract form_guids from FHIR data actions with definitionCanonical
+  const referencedForms = [];
+  const fhirData = pd.fhir_data || {};
+  const fhirActions = fhirData.action || [];
+  fhirActions.forEach(act => {
+    const dc = act.definitionCanonical || '';
+    if (dc.startsWith('Questionnaire/')) {
+      referencedForms.push(dc.replace('Questionnaire/', ''));
+    }
+  });
+
+  // Also check raw action JSON for is_form entries
+  let rawActions = [];
+  try { rawActions = JSON.parse(pd.action || '[]'); } catch(e) {}
+  rawActions.forEach(act => {
+    if (act.is_form && act.form_guid && !referencedForms.includes(act.form_guid)) {
+      referencedForms.push(act.form_guid);
+    }
+  });
+
+  if (referencedForms.length > 0) {
+    let matched = 0;
+    Array.from(formSelect.options).forEach(opt => {
+      if (referencedForms.includes(opt.value)) {
+        opt.selected = true;
+        matched++;
+      }
+    });
+    if (matched > 0) {
+      infoDiv.innerHTML = '<span style="font-size:0.8em; color:var(--success);">' + matched + ' form(s) auto-selected from PlanDefinition</span>';
+    }
+  }
+});
+</script>
 {% endblock %}
