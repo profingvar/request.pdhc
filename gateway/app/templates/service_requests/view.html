@@ -4,15 +4,17 @@
 {# ── Display-type helper: maps FHIR item type to human-friendly render type ── #}
 {% macro render_type(item) -%}
   {%- set raw = item.get('type', '') -%}
-  {%- set ns = namespace(is_slider=false) -%}
+  {%- set ns = namespace(is_slider=false, has_min=false, has_max=false) -%}
   {%- for ext in item.get('extension', []) -%}
     {%- if 'questionnaire-itemControl' in ext.get('url', '') -%}
       {%- for c in ext.get('valueCodeableConcept', {}).get('coding', []) -%}
         {%- if c.get('code') == 'slider' -%}{%- set ns.is_slider = true -%}{%- endif -%}
       {%- endfor -%}
     {%- endif -%}
+    {%- if 'minValue' in ext.get('url', '') -%}{%- set ns.has_min = true -%}{%- endif -%}
+    {%- if 'maxValue' in ext.get('url', '') -%}{%- set ns.has_max = true -%}{%- endif -%}
   {%- endfor -%}
-  {%- if raw == 'integer' and ns.is_slider -%}slider
+  {%- if raw == 'integer' and (ns.is_slider or (ns.has_min and ns.has_max)) -%}slider
   {%- elif raw == 'choice' and item.get('repeats') -%}multi-choice
   {%- elif raw == 'choice' -%}single-choice
   {%- elif raw == 'open-choice' and item.get('repeats') -%}multi-choice (open)
