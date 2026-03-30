@@ -14,6 +14,14 @@
 
    DONE — Added a "Request" column as the first column in the Contract Matches table, showing the full `service_request_guid` for each match.
 
-5. Implement updates on request on miserver (now reachable ssh miserver). 
+5. Implement updates on request on miserver (now reachable ssh miserver).
+
+   DONE — Committed all changes (10b98b6), pushed to origin/main, pulled on miserver. Stale local files on server were cleaned. Docker image rebuilt, containers restarted, migration c3d4e5f6a7b8 applied automatically. Health check passing: `{"database":"connected","status":"ok"}`.
 
 6. so the server is reached then ssh miserver@192.168.1.154 and repo is in /usr/local/www/request.pdhc
+
+   DONE — Server access confirmed: `ssh miserver@192.168.1.154`, repo at `/usr/local/www/request.pdhc`. Docker via Homebrew (`/opt/homebrew/bin/docker-compose`). Deploy command: `export PATH=/opt/homebrew/bin:$PATH && cd /usr/local/www/request.pdhc/gateway && docker-compose down && docker-compose up -d --build`.
+
+7. Item in request ska med på listan Provider Delivery Blob (dev). Conceptet QOL är en slider inte som det står integer. Likaså skilj på enval och flervalsfrgåor inför rendering.
+
+   DONE — Three changes in view.html: (1) Questionnaire items now listed under each Questionnaire row in the Provider Delivery Blob readout, showing text, render type, and linkId with nested indentation. (2) Added a `render_type` Jinja macro that detects the `questionnaire-itemControl` extension with code `slider` on `integer` items and displays "slider" instead of "integer". (3) `choice` items are now shown as "single-choice" or "multi-choice" (based on `repeats`), and `open-choice` likewise. The same macro is used in both the Questionnaire Readout and the Provider Delivery Blob panels.

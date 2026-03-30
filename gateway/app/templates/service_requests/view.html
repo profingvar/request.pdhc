@@ -1,6 +1,26 @@
 {% extends "base.html" %}
 {% block title %}ServiceRequest {{ sr.guid[:8] }} — request.pdhc{% endblock %}
 
+{# ── Display-type helper: maps FHIR item type to human-friendly render type ── #}
+{% macro render_type(item) -%}
+  {%- set raw = item.get('type', '') -%}
+  {%- set ns = namespace(is_slider=false) -%}
+  {%- for ext in item.get('extension', []) -%}
+    {%- if 'questionnaire-itemControl' in ext.get('url', '') -%}
+      {%- for c in ext.get('valueCodeableConcept', {}).get('coding', []) -%}
+        {%- if c.get('code') == 'slider' -%}{%- set ns.is_slider = true -%}{%- endif -%}
+      {%- endfor -%}
+    {%- endif -%}
+  {%- endfor -%}
+  {%- if raw == 'integer' and ns.is_slider -%}slider
+  {%- elif raw == 'choice' and item.get('repeats') -%}multi-choice
+  {%- elif raw == 'choice' -%}single-choice
+  {%- elif raw == 'open-choice' and item.get('repeats') -%}multi-choice (open)
+  {%- elif raw == 'open-choice' -%}single-choice (open)
+  {%- else -%}{{ raw }}
+  {%- endif -%}
+{%- endmacro %}
+
 {% block content %}
 <div style="display:flex; justify-content:space-between; align-items:center;">
   <h1>ServiceRequest
@@ -172,7 +192,7 @@
             <tr>
               <td>{{ ns.counter }}</td>
               <td>{{ item.get('text', item.get('linkId', '')) }}</td>
-              <td><span class="badge badge-info" style="font-size:0.7rem;">{{ item.get('type', '') }}</span></td>
+              <td><span class="badge badge-info" style="font-size:0.7rem;">{{ render_type(item) }}</span></td>
               <td>{% if item.get('required') %}Yes{% else %}—{% endif %}</td>
             </tr>
             {# One level of nesting #}
@@ -181,7 +201,7 @@
               <tr>
                 <td style="padding-left:1rem;">{{ ns.counter }}</td>
                 <td style="padding-left:1rem;">{{ sub.get('text', sub.get('linkId', '')) }}</td>
-                <td><span class="badge badge-info" style="font-size:0.7rem;">{{ sub.get('type', '') }}</span></td>
+                <td><span class="badge badge-info" style="font-size:0.7rem;">{{ render_type(sub) }}</span></td>
                 <td>{% if sub.get('required') %}Yes{% else %}—{% endif %}</td>
               </tr>
               {# Second level of nesting #}
@@ -190,7 +210,7 @@
                 <tr>
                   <td style="padding-left:2rem;">{{ ns.counter }}</td>
                   <td style="padding-left:2rem;">{{ sub2.get('text', sub2.get('linkId', '')) }}</td>
-                  <td><span class="badge badge-info" style="font-size:0.7rem;">{{ sub2.get('type', '') }}</span></td>
+                  <td><span class="badge badge-info" style="font-size:0.7rem;">{{ render_type(sub2) }}</span></td>
                   <td>{% if sub2.get('required') %}Yes{% else %}—{% endif %}</td>
                 </tr>
               {% endfor %}
@@ -327,6 +347,23 @@
                 <a href="https://plan.pdhc.se/forms/{{ q_guid }}" target="_blank" class="btn btn-sm btn-secondary" style="padding:0.1rem 0.4rem; font-size:0.75rem;">Plan</a>
               </td>
             </tr>
+            {# Questionnaire items #}
+            {% for qi in c.get('item', []) %}
+            <tr style="color:var(--text-muted);">
+              <td style="padding-left:1.5rem;">Item</td>
+              <td>{{ qi.get('text', qi.get('linkId', '')) }} <span class="badge badge-info" style="font-size:0.65rem;">{{ render_type(qi) }}</span></td>
+              <td style="font-size:0.75rem;">{{ qi.get('linkId', '') }}</td>
+              <td><span style="font-size:0.75rem;">contained</span></td>
+            </tr>
+              {% for qi2 in qi.get('item', []) %}
+              <tr style="color:var(--text-muted);">
+                <td style="padding-left:2.5rem;">Item</td>
+                <td>{{ qi2.get('text', qi2.get('linkId', '')) }} <span class="badge badge-info" style="font-size:0.65rem;">{{ render_type(qi2) }}</span></td>
+                <td style="font-size:0.75rem;">{{ qi2.get('linkId', '') }}</td>
+                <td><span style="font-size:0.75rem;">contained</span></td>
+              </tr>
+              {% endfor %}
+            {% endfor %}
             {% endif %}
           {% endfor %}
         </tbody>
