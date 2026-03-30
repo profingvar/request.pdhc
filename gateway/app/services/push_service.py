@@ -317,7 +317,7 @@ def _push_forms_to_1177(sr, user_guid=None, ip_address=None):
         action='service_request.push_forms_1177',
         resource_type='ServiceRequest',
         resource_guid=sr.guid,
-        details={'forms_count': len(forms_with_snapshot), 'result': result.get('status')},
+        details={'forms_count': len(forms_with_questionnaire), 'result': result.get('status')},
         ip_address=ip_address,
     )
 
