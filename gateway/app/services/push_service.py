@@ -5,11 +5,17 @@ creates delivery receipts for tracking, and handles response callbacks.
 """
 
 import base64
+import ipaddress
 import json
+import logging
+import socket
 import requests as http_requests
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 from flask import current_app
 from app import db
+
+logger = logging.getLogger(__name__)
 from app.models.service_request_models import (
     ServiceRequest, ServiceRequestContractMatch, ServiceRequestReceipt
 )
@@ -152,8 +158,10 @@ def push_to_provider(match_guid, user_guid=None, ip_address=None):
                     'body': resp.text[:1000],
                 }
         except http_requests.RequestException as e:
+            logger.error('Push delivery failed: org=%s sr=%s error=%s',
+                         match.provider_org_guid, sr.guid, str(e))
             receipt.delivery_status = 'failed'
-            receipt.response_payload = {'error': str(e)}
+            receipt.response_payload = {'error': 'upstream_delivery_failed'}
     else:
         # No endpoint configured — mark as sent (offer mode, provider polls)
         receipt.delivery_status = 'queued'
@@ -310,7 +318,8 @@ def _push_forms_to_1177(sr, user_guid=None, ip_address=None):
         if status == 'failed':
             result['body'] = resp.text[:500]
     except http_requests.RequestException as e:
-        result = {'status': 'failed', 'error': str(e)}
+        logger.error('1177 push failed: sr=%s error=%s', sr.guid, str(e))
+        result = {'status': 'failed', 'error': 'upstream_delivery_failed'}
 
     log_event(
         user_guid=user_guid,
@@ -329,11 +338,14 @@ def _push_forms_to_1177(sr, user_guid=None, ip_address=None):
     return result
 
 
-def handle_provider_response(receipt_token, response_payload):
+def handle_provider_response(receipt_token, response_payload, provider_org_guid=None):
     """Handle a provider's response via receipt token.
 
     Called when a provider sends back an acceptance/rejection
     using the receipt_token from the push bundle.
+
+    Args:
+        provider_org_guid: If set, verifies the receipt belongs to this provider (IDOR protection).
 
     Returns:
         tuple: (result_dict, status_code)
@@ -341,6 +353,14 @@ def handle_provider_response(receipt_token, response_payload):
     receipt = ServiceRequestReceipt.query.filter_by(receipt_token=receipt_token).first()
     if not receipt:
         return {'code': 'not_found', 'message': 'Receipt not found'}, 404
+
+    # Verify provider ownership if org_guid provided
+    if provider_org_guid:
+        match_check = ServiceRequestContractMatch.query.filter_by(
+            guid=receipt.contract_match_guid
+        ).first()
+        if not match_check or match_check.provider_org_guid != provider_org_guid:
+            return {'code': 'unauthorized', 'message': 'Receipt does not belong to this provider'}, 403
 
     if receipt.response_received:
         return {'code': 'already_responded', 'message': 'Response already recorded'}, 400
@@ -435,6 +455,28 @@ def list_receipts_for_request(service_request_guid):
     }, 200
 
 
+def _validate_push_url(url):
+    """Validate push endpoint URL against SSRF — reject private IPs, require HTTPS in prod."""
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.hostname:
+        raise ValueError('Invalid URL')
+
+    # Require HTTPS in production
+    env = current_app.config.get('FLASK_ENV', 'production')
+    if env != 'development' and parsed.scheme != 'https':
+        raise ValueError('Push endpoint must use HTTPS in production')
+
+    # Resolve hostname and reject private/loopback IPs
+    try:
+        resolved = socket.getaddrinfo(parsed.hostname, parsed.port or 443)
+        for family, _, _, _, sockaddr in resolved:
+            ip = ipaddress.ip_address(sockaddr[0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                raise ValueError(f'Push endpoint resolves to non-routable address')
+    except socket.gaierror:
+        raise ValueError(f'Push endpoint hostname does not resolve')
+
+
 def _get_provider_endpoint(provider_org_guid):
     """Look up the push endpoint for a provider organisation.
 
@@ -448,5 +490,11 @@ def _get_provider_endpoint(provider_org_guid):
         revoked=False,
     ).first()
     if pat and pat.is_valid() and pat.push_endpoint_url:
+        try:
+            _validate_push_url(pat.push_endpoint_url)
+        except ValueError as e:
+            logger.warning('SSRF blocked: push_endpoint_url=%s org=%s reason=%s',
+                           pat.push_endpoint_url, provider_org_guid, str(e))
+            return None, None
         return pat.push_endpoint_url, pat.push_auth_key_encrypted
     return None, None

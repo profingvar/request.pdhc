@@ -32,7 +32,7 @@ class ProviderAccessToken(db.Model):
 
     @staticmethod
     def hash_token(raw_token):
-        return bcrypt.hashpw(raw_token.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        return bcrypt.hashpw(raw_token.encode('utf-8'), bcrypt.gensalt(rounds=12)).decode('utf-8')
 
     def verify_token(self, raw_token):
         return bcrypt.checkpw(raw_token.encode('utf-8'), self.token_hash.encode('utf-8'))

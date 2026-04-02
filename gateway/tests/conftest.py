@@ -5,6 +5,9 @@ import pytest
 os.environ['AUTH_DISABLED'] = 'true'
 os.environ['FLASK_ENV'] = 'testing'
 os.environ['DATABASE_URL'] = 'sqlite:///test_request_pdhc.db'
+os.environ['HMAC_SECRET'] = 'test-hmac-secret-for-pytest-minimum-32-chars'
+os.environ.setdefault('FLASK_SECRET_KEY', 'test-secret-key')
+os.environ.setdefault('JWT_SECRET_KEY', 'test-jwt-key')
 
 from app import create_app, db as _db
 

@@ -1,24 +1,22 @@
 import os
+import sys
 from datetime import timedelta
 
 
 class Config:
-    SQLALCHEMY_DATABASE_URI = os.environ.get(
-        'DATABASE_URL',
-        'postgresql://request_admin:request_dev_2026!@localhost:9061/request_pdhc'
-    )
+    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL', '')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-    SECRET_KEY = os.environ.get('FLASK_SECRET_KEY', 'change-me')
-
-    JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'change-me')
+    SECRET_KEY = os.environ.get('FLASK_SECRET_KEY', '')
+    JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', '')
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=1)
 
     FLASK_ENV = os.environ.get('FLASK_ENV', 'development')
     DEBUG = FLASK_ENV == 'development'
 
     # When True, all auth checks are bypassed (local dev/debug mode).
-    AUTH_DISABLED = os.environ.get('AUTH_DISABLED', 'true').lower() in ('true', '1', 'yes')
+    # Defaults to False — must be explicitly enabled.
+    AUTH_DISABLED = os.environ.get('AUTH_DISABLED', 'false').lower() in ('true', '1', 'yes')
 
     # Upstream service URLs
     IPS_BASE_URL = os.environ.get('IPS_BASE_URL', 'https://ips.pdhc.se')

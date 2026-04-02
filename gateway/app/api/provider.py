@@ -77,7 +77,7 @@ def report(sr_guid):
     if not body:
         return jsonify({'code': 'bad_request', 'message': 'JSON body required'}), 400
 
-    required = ['patient_guid', 'organisation_guid', 'grant_token']
+    required = ['patient_guid', 'organisation_guid', 'grant_token', 'contract_guid']
     missing = [f for f in required if not body.get(f)]
     if missing:
         return jsonify({
@@ -151,5 +151,7 @@ def ack_receipt(receipt_token):
     body = request.get_json() or {}
     body.setdefault('status', 'acknowledged')
 
-    data, status = handle_provider_response(receipt_token, body)
+    data, status = handle_provider_response(
+        receipt_token, body, provider_org_guid=g.provider_org_guid,
+    )
     return jsonify(data), status

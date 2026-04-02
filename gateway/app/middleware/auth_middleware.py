@@ -86,8 +86,9 @@ def requires_provider_token(scope='read'):
         @wraps(f)
         def decorated(*args, **kwargs):
             if current_app.config.get('AUTH_DISABLED'):
-                g.provider_org_guid = request.args.get('provider_org_guid', 'dev-org')
-                g.provider_contract_guid = request.args.get('contract_guid', 'dev-contract')
+                # Dev bypass — use fixed dev identities, never from request params
+                g.provider_org_guid = 'dev-org-00000000'
+                g.provider_contract_guid = 'dev-contract-00000000'
                 g.provider_delivery_mode = 'poll'
                 return f(*args, **kwargs)
 

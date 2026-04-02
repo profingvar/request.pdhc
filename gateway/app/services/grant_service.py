@@ -14,7 +14,10 @@ def _hmac_secret():
     """Get the HMAC secret for grant token signing."""
     secret = current_app.config.get('HMAC_SECRET')
     if not secret:
-        secret = current_app.config.get('SECRET_KEY', 'fallback-not-for-production')
+        raise RuntimeError(
+            'HMAC_SECRET must be explicitly configured. '
+            'Do not rely on SECRET_KEY fallback for grant signing.'
+        )
     return secret
 
 
