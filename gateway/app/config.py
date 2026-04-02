@@ -34,6 +34,9 @@ class Config:
     FORMS_1177_API_KEY = os.environ.get('FORMS_1177_API_KEY', '')
     FORMS_1177_ORG_GUID = os.environ.get('FORMS_1177_ORG_GUID', '14b25a1f-63b4-4369-810b-15388d22947b')
 
+    # Internal service-to-service auth (gateway.pdhc calls these endpoints)
+    INTERNAL_SERVICE_KEY = os.environ.get('INTERNAL_SERVICE_KEY', '')
+
     # Provider delivery
     HMAC_SECRET = os.environ.get('HMAC_SECRET', SECRET_KEY)
     PAT_DEFAULT_EXPIRY_DAYS = int(os.environ.get('PAT_DEFAULT_EXPIRY_DAYS', '365'))

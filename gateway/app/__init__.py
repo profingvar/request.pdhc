@@ -87,6 +87,9 @@ def create_app(testing=False):
     from app.api.admin_tokens import admin_tokens_bp
     app.register_blueprint(admin_tokens_bp, url_prefix='/api/v1')
 
+    from app.api.internal import internal_bp
+    app.register_blueprint(internal_bp, url_prefix='/api/v1')
+
     # Register web UI blueprints
     from app.routes.main import main_bp
     app.register_blueprint(main_bp)

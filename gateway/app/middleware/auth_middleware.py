@@ -1,3 +1,4 @@
+import hmac as hmac_mod
 from functools import wraps
 from flask import current_app, request, jsonify, abort, g
 from flask_login import current_user
@@ -114,6 +115,21 @@ def requires_provider_token(scope='read'):
             return f(*args, **kwargs)
         return decorated
     return decorator
+
+
+def requires_service_key(f):
+    """Require X-Service-Key header for internal service-to-service calls.
+    Uses constant-time comparison. Generic error on failure."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        key = current_app.config.get('INTERNAL_SERVICE_KEY')
+        if not key:
+            return jsonify({'error': 'unauthorized'}), 401
+        provided = request.headers.get('X-Service-Key', '')
+        if not provided or not hmac_mod.compare_digest(provided, key):
+            return jsonify({'error': 'unauthorized'}), 401
+        return f(*args, **kwargs)
+    return decorated
 
 
 def requires_role(role):

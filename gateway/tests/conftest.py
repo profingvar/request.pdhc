@@ -6,6 +6,7 @@ os.environ['AUTH_DISABLED'] = 'true'
 os.environ['FLASK_ENV'] = 'testing'
 os.environ['DATABASE_URL'] = 'sqlite:///test_request_pdhc.db'
 os.environ['HMAC_SECRET'] = 'test-hmac-secret-for-pytest-minimum-32-chars'
+os.environ['INTERNAL_SERVICE_KEY'] = 'test-internal-service-key-12345'
 os.environ.setdefault('FLASK_SECRET_KEY', 'test-secret-key')
 os.environ.setdefault('JWT_SECRET_KEY', 'test-jwt-key')
 
