@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Documentation{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Documentation</h1>
+    <p class="lead">Download manuals and runbooks as Markdown.</p>
+  </div>
+</div>
+
+{% macro doc_card(d, subdir='') -%}
+  {% set href = url_for('docs.download_doc', filename=(subdir + '/' + d.filename) if subdir else d.filename) %}
+  <div class="card" style="display:flex;flex-direction:column;justify-content:space-between;">
+    <div>
+      <div style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.4rem">
+        <i data-lucide="{{ d.icon }}"></i>
+        <h3 style="margin:0">{{ d.title }}</h3>
+      </div>
+      {% if d.desc %}<p class="text-muted" style="margin-bottom:0.5rem">{{ d.desc }}</p>{% endif %}
+    </div>
+    <a href="{{ href }}" download class="btn btn-sm btn-secondary" style="align-self:flex-start;">
+      <i data-lucide="download"></i> Download
+    </a>
+  </div>
+{%- endmacro %}
+
+<h2>Manuals</h2>
+{% if manuals or manuals_other %}
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:0.75rem;margin-bottom:1.5rem">
+  {% for d in manuals %}{{ doc_card(d) }}{% endfor %}
+  {% for d in manuals_other %}{{ doc_card(d) }}{% endfor %}
+</div>
+{% else %}
+<p class="text-muted">No manuals found in <code>gateway/docs/</code>.</p>
+{% endif %}
+
+<h2>Runbooks</h2>
+{% if runbooks or runbooks_other %}
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:0.75rem;margin-bottom:1.5rem">
+  {% for d in runbooks %}{{ doc_card(d, subdir='runbooks') }}{% endfor %}
+  {% for d in runbooks_other %}{{ doc_card(d, subdir='runbooks') }}{% endfor %}
+</div>
+{% else %}
+<p class="text-muted">No runbooks found in <code>gateway/docs/runbooks/</code>.</p>
+{% endif %}
+
+{% endblock %}
