@@ -19,6 +19,8 @@
       <li><a href="{{ url_for('main.dashboard') }}" {% if request.endpoint == 'main.dashboard' %}class="active"{% endif %}>Dashboard</a></li>
       <li><a href="{{ url_for('patients_web.list_patients') }}" {% if request.blueprint == 'patients_web' %}class="active"{% endif %}>Patients</a></li>
       <li><a href="{{ url_for('service_requests_web.list_view') }}" {% if request.blueprint == 'service_requests_web' %}class="active"{% endif %}>ServiceRequests</a></li>
+      <li><a href="{{ url_for('docs.docs_index') }}" {% if request.blueprint == 'docs' %}class="active"{% endif %}>Docs</a></li>
+      <li><a href="{{ url_for('api_docs.api_reference') }}" {% if request.blueprint == 'api_docs' %}class="active"{% endif %}>API</a></li>
       <li class="nav-separator"></li>
       {% if current_user.is_authenticated %}
       <li>

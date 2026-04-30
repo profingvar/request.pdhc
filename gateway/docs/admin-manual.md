@@ -42,22 +42,22 @@ Each state transition emits an audit row.
 ### 3.2 Creating a service request
 
 ```http
-POST /api/v1/service-requests
-Authorization: Bearer <SSO JWT>
+POST /api/v1/ServiceRequest
+Cookie: <SSO session cookie>
 Content-Type: application/json
 
 {
-  "subject": { "reference": "Patient/<guid>" },
-  "code": { ... FHIR CodeableConcept ... },
-  "occurrence": { "boundsPeriod": { "start": "...", "end": "..." } },
-  "performer": [ { "reference": "Organization/<provider-org-guid>" } ],
-  "based_on_contract": "Contract/<contract-guid>",
-  "transactions": [
-    { "concept_canonical": "https://termbank.pdhc.se/CodeSystem/loinc/4548-4",
-      "requirement": "obligatory" }
-  ]
+  "patient_guid": "<guid>",
+  "plan_definition_guid": "<plan-def-guid>",
+  "contract_guid": "<contract-guid>",
+  "notes": "optional free-text"
 }
 ```
+
+The `plan_definition_guid` resolves to a snapshot containing the
+contract reference, performer org, transaction concepts and
+requirement levels. Mutating the snapshot before finalize is done
+via `PUT /api/v1/ServiceRequest/<guid>/snapshot`.
 
 **Validation gates** (all must pass before the request becomes `active`):
 
@@ -86,9 +86,11 @@ Patients are pseudonymised at the platform level (stable `patient_guid`). reques
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /api/v1/patients` | List patients in scope |
-| `POST /api/v1/patients` | Create local cache row (auto-called by SR creation) |
-| `GET /api/v1/patients/<guid>` | Patient details + their open SRs |
+| `GET /api/v1/Patient` | List patients in scope |
+| `POST /api/v1/Patient` | Create local cache row (auto-called by SR creation) |
+| `GET /api/v1/Patient/<guid>` | Patient details |
+| `PUT /api/v1/Patient/<guid>` | Update cache fields |
+| `DELETE /api/v1/Patient/<guid>` | Remove cache row |
 
 ## 5) Care plans
 

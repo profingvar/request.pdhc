@@ -106,6 +106,12 @@ def create_app(testing=False):
     from app.routes.service_requests import service_requests_web_bp
     app.register_blueprint(service_requests_web_bp)
 
+    from app.routes.docs import docs_bp
+    app.register_blueprint(docs_bp)
+
+    from app.routes.api_docs import api_docs_bp
+    app.register_blueprint(api_docs_bp)
+
     # Health endpoint
     @app.route('/api/health')
     def health():
@@ -119,10 +125,20 @@ def create_app(testing=False):
             pass
         status = 'ok' if db_ok else 'degraded'
         code = 200 if db_ok else 503
-        return jsonify({
+        resp = jsonify({
             'status': status,
             'database': 'connected' if db_ok else 'unavailable',
-        }), code
+            'service': 'request.pdhc',
+        })
+        # Ticket #70 / CLAUDE.md §10: let www.pdhc.se/services.html read the
+        # JSON body cross-origin so it can drive real status/DB dots. Specific
+        # origin + Vary: Origin (not "*") keeps future Allow-Credentials
+        # spec-compliant.
+        resp.headers['Access-Control-Allow-Origin'] = 'https://www.pdhc.se'
+        resp.headers['Access-Control-Allow-Methods'] = 'GET'
+        resp.headers['Vary'] = 'Origin'
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp, code
 
     # JSON error handlers for API routes
     @app.errorhandler(400)

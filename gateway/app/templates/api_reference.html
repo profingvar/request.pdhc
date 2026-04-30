@@ -1,0 +1,320 @@
+{% extends "base.html" %}
+{% block title %}API Reference{% endblock %}
+
+{% block head %}
+<style>
+  .api-toc {
+    position: sticky;
+    top: 3rem;
+    align-self: flex-start;
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 6px;
+    padding: 0.75rem;
+    width: 220px;
+    flex-shrink: 0;
+    max-height: calc(100vh - 5rem);
+    overflow-y: auto;
+  }
+  .api-toc ol { list-style: none; margin: 0; padding: 0; counter-reset: api-section; }
+  .api-toc li { counter-increment: api-section; margin: 0.15rem 0; }
+  .api-toc li::before { content: counter(api-section) ") "; color: var(--text-muted); }
+  .api-toc a { font-size: 0.92em; color: var(--text); }
+  .api-toc a:hover { color: var(--primary); }
+  .api-layout { display: flex; gap: 1.25rem; align-items: flex-start; }
+  .api-body { flex: 1; min-width: 0; }
+  .api-section { background: var(--card-bg, #fff); border: 1px solid var(--border, #e2e8f0); border-radius: 6px; padding: 1rem 1.2rem; margin-bottom: 1rem; }
+  .api-section h2 { margin: 0 0 0.6rem 0; font-size: 1.1em; }
+  .api-section h3 { margin: 0.8rem 0 0.4rem 0; font-size: 1em; }
+  .api-section p { margin: 0.4rem 0; }
+  .api-section table { width: 100%; border-collapse: collapse; margin: 0.4rem 0; font-size: 0.95em; }
+  .api-section th, .api-section td { border-bottom: 1px solid var(--border, #e2e8f0); padding: 0.32rem 0.5rem; text-align: left; vertical-align: top; }
+  .api-section th { background: var(--code-bg, #f1f5f9); font-weight: 600; }
+  .api-section code { background: var(--code-bg, #f1f5f9); padding: 0.05em 0.3em; border-radius: 3px; font-size: 0.92em; }
+  .api-section pre { background: var(--code-bg, #f1f5f9); padding: 0.6rem 0.8rem; border-radius: 4px; overflow-x: auto; margin: 0.4rem 0; font-size: 0.9em; line-height: 1.45; }
+  .api-section pre code { background: transparent; padding: 0; }
+  .method { display: inline-block; min-width: 50px; text-align: center; font-size: 0.8em; font-weight: 600; padding: 0.05em 0.4em; border-radius: 3px; color: white; }
+  .method-GET    { background: #16a34a; }
+  .method-POST   { background: #2563eb; }
+  .method-PUT    { background: #d97706; }
+  .method-PATCH  { background: #d97706; }
+  .method-DELETE { background: #dc2626; }
+  .scope-pill { display: inline-block; font-size: 0.75em; padding: 0.05em 0.4em; border-radius: 3px; background: var(--code-bg, #f1f5f9); color: var(--text-muted); }
+  .auth-mode { font-size: 0.8em; color: var(--text-muted); }
+  .lifecycle-svg { font-family: 'SF Mono', Monaco, 'Courier New', monospace; font-size: 0.85em; line-height: 1.4; white-space: pre; background: var(--code-bg, #f1f5f9); padding: 0.6rem; border-radius: 4px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>API Reference</h1>
+    <p class="lead">HTTP surface of <code>request.pdhc</code>. Same content as <a href="{{ url_for('docs.download_doc', filename='api.md') }}" download>api.md</a>, rendered for in-browser reading.</p>
+  </div>
+</div>
+
+<div class="api-layout">
+  <nav class="api-toc">
+    <ol>
+      <li><a href="#conventions">Conventions</a></li>
+      <li><a href="#authentication">Authentication</a></li>
+      <li><a href="#health">Health & capability</a></li>
+      <li><a href="#patient">Patient</a></li>
+      <li><a href="#servicerequest">ServiceRequest</a></li>
+      <li><a href="#fhir-readonly">Form / PlanDef / Contract</a></li>
+      <li><a href="#careplan">CarePlan</a></li>
+      <li><a href="#export">Export</a></li>
+      <li><a href="#requests">Requests (queue)</a></li>
+      <li><a href="#provider">Provider feed (PAT)</a></li>
+      <li><a href="#providers">Providers (directory)</a></li>
+      <li><a href="#admin">Admin — provider tokens</a></li>
+      <li><a href="#internal">Internal — service-to-service</a></li>
+    </ol>
+  </nav>
+
+  <div class="api-body">
+
+    <div class="api-section">
+      <p>Base URL: <code>https://request.pdhc.se</code> (production) / <code>http://127.0.0.1:9060</code> (local dev). All API routes (except <code>/api/health</code>) are under <code>/api/v1</code>.</p>
+    </div>
+
+    <div class="api-section" id="conventions">
+      <h2>1) Conventions</h2>
+      <ul style="margin:0.4rem 0 0.4rem 1.25rem;">
+        <li>All bodies are JSON unless noted.</li>
+        <li>Dates are ISO-8601 with explicit timezone (<code>Z</code> or <code>+HH:MM</code>).</li>
+        <li>All cross-resource references use <strong>GUIDs</strong> (Rule 18) — never integer IDs.</li>
+      </ul>
+      <table>
+        <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>200 / 201</code></td><td>Success</td></tr>
+          <tr><td><code>400</code></td><td>Malformed body / missing required field</td></tr>
+          <tr><td><code>401</code></td><td>Missing / invalid auth</td></tr>
+          <tr><td><code>403</code></td><td>Wrong role / scope / org mismatch</td></tr>
+          <tr><td><code>404</code></td><td>Resource not found</td></tr>
+          <tr><td><code>409</code></td><td>Duplicate / state conflict</td></tr>
+          <tr><td><code>422</code></td><td>Schema valid, business rule violated</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="api-section" id="authentication">
+      <h2>2) Authentication</h2>
+      <p>Three credential modes; each blueprint accepts exactly one.</p>
+      <table>
+        <thead><tr><th>Mode</th><th>Header</th><th>Used by</th></tr></thead>
+        <tbody>
+          <tr><td><strong>SSO Bearer (session)</strong></td><td>session cookie set by <code>/auth/callback</code></td><td>Browser UI + SSO-authenticated JSON callers</td></tr>
+          <tr><td><strong>Provider Access Token (PAT)</strong></td><td><code>X-Provider-Token: &lt;PAT&gt;</code></td><td>Sibling provider services pulling a feed / submitting reports</td></tr>
+          <tr><td><strong>Internal service-key</strong></td><td><code>X-Service-Key: &lt;secret&gt;</code></td><td>gateway.pdhc, contract.pdhc, sso.pdhc — never exposed publicly</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Endpoints</h3>
+      <table>
+        <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/auth/login</code></td><td><span class="auth-mode">public</span></td><td>Redirect to sso.pdhc OAuth 2.0 authorise endpoint with PKCE</td></tr>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/auth/callback</code></td><td><span class="auth-mode">public</span></td><td>Receives SSO redirect, exchanges code for tokens, sets session cookie</td></tr>
+          <tr><td><span class="method method-POST">POST</span></td><td><code>/api/v1/auth/logout</code></td><td><span class="auth-mode">SSO</span></td><td>Clears session, revokes refresh token if held</td></tr>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/auth/me</code></td><td><span class="auth-mode">SSO</span></td><td>Returns current user's SSO blob (user_guid, email, organization_ids, is_su_admin, role bindings)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="api-section" id="health">
+      <h2>3) Health and capability</h2>
+
+      <h3><span class="method method-GET">GET</span> <code>/api/health</code></h3>
+      <p><span class="auth-mode">public</span> — CORS-enabled for <code>https://www.pdhc.se</code> so the platform status page can read the JSON body.</p>
+      <pre><code>{ "status": "ok", "service": "request.pdhc", "database": "connected" }</code></pre>
+      <p><code>status: degraded</code> and HTTP 503 if the DB probe (<code>SELECT 1</code>) fails.</p>
+
+      <h3><span class="method method-GET">GET</span> <code>/api/v1/metadata</code></h3>
+      <p><span class="auth-mode">public</span> — FHIR R5 CapabilityStatement describing supported resources + operations.</p>
+    </div>
+
+    <div class="api-section" id="patient">
+      <h2>4) Patient</h2>
+      <p>Local pseudonymised cache of patients known to this org. The full patient record lives in <code>ips.pdhc</code>; we only persist the GUID, identifier, and the organisation scope.</p>
+      <table>
+        <thead><tr><th>Method</th><th>Path</th><th>Role</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/Patient</code></td><td><span class="scope-pill">any</span></td><td>List/search (proxies to ips.pdhc, org-filtered)</td></tr>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/Patient/&lt;guid&gt;</code></td><td><span class="scope-pill">any</span></td><td>Read one</td></tr>
+          <tr><td><span class="method method-POST">POST</span></td><td><code>/api/v1/Patient</code></td><td><span class="scope-pill">read_write</span></td><td>Create cache entry</td></tr>
+          <tr><td><span class="method method-PUT">PUT</span></td><td><code>/api/v1/Patient/&lt;guid&gt;</code></td><td><span class="scope-pill">read_write</span></td><td>Update cache entry</td></tr>
+          <tr><td><span class="method method-DELETE">DELETE</span></td><td><code>/api/v1/Patient/&lt;guid&gt;</code></td><td><span class="scope-pill">read_write</span></td><td>Remove cache entry</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="api-section" id="servicerequest">
+      <h2>5) ServiceRequest</h2>
+      <p>The state-machine heart of <code>request.pdhc</code>.</p>
+
+      <h3>5.1 Lifecycle</h3>
+      <div class="lifecycle-svg">draft  ──finalize──▶  active  ──push──▶  in-flight  ──respond──▶  completed
+   │                    │
+   ├─── revoke ────────▶ revoked
+   └─── archive ──────▶ archived</div>
+      <p><code>draft → active</code> requires the referenced <code>Contract.status == "executed"</code>. See <a href="https://contract.pdhc.se/docs">contract.pdhc admin-manual §3</a> for the contract status enum.</p>
+
+      <h3>5.2 Endpoints</h3>
+      <table>
+        <thead><tr><th>Method</th><th>Path</th><th>Role</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/ServiceRequest</code></td><td><span class="scope-pill">any</span></td><td>List (org-filtered for non-SU). Query: <code>status</code>, <code>page</code>, <code>per_page</code></td></tr>
+          <tr><td><span class="method method-POST">POST</span></td><td><code>/api/v1/ServiceRequest</code></td><td><span class="scope-pill">read_write</span></td><td>Create draft. Body: <code>patient_guid</code>, <code>plan_definition_guid</code>, optional <code>contract_guid</code>, <code>notes</code></td></tr>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/ServiceRequest/&lt;guid&gt;</code></td><td><span class="scope-pill">any</span></td><td>Read one</td></tr>
+          <tr><td><span class="method method-PUT">PUT</span></td><td><code>/api/v1/ServiceRequest/&lt;guid&gt;/snapshot</code></td><td><span class="scope-pill">read_write</span></td><td>Update PlanDefinition snapshot (draft only)</td></tr>
+          <tr><td><span class="method method-POST">POST</span></td><td><code>/api/v1/ServiceRequest/&lt;guid&gt;/finalize</code></td><td><span class="scope-pill">read_write</span></td><td>Build FHIR Bundle, transition to active</td></tr>
+          <tr><td><span class="method method-POST">POST</span></td><td><code>/api/v1/ServiceRequest/&lt;guid&gt;/archive</code></td><td><span class="scope-pill">read_write</span></td><td>Archive</td></tr>
+          <tr><td><span class="method method-POST">POST</span></td><td><code>/api/v1/ServiceRequest/&lt;guid&gt;/revoke</code></td><td><span class="scope-pill">read_write</span></td><td>Revoke (writes <code>revoke_reason</code> to audit)</td></tr>
+          <tr><td><span class="method method-POST">POST</span></td><td><code>/api/v1/ServiceRequest/auto-archive</code></td><td><span class="scope-pill">read_write</span></td><td>Bulk-archive completed SRs older than threshold</td></tr>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/ServiceRequest/&lt;guid&gt;/matches</code></td><td><span class="scope-pill">any</span></td><td>List candidate provider orgs for this SR</td></tr>
+          <tr><td><span class="method method-POST">POST</span></td><td><code>/api/v1/ServiceRequest/&lt;guid&gt;/match</code></td><td><span class="scope-pill">read_write</span></td><td>Assign a provider match</td></tr>
+          <tr><td><span class="method method-POST">POST</span></td><td><code>/api/v1/ServiceRequest/&lt;guid&gt;/push</code></td><td><span class="scope-pill">read_write</span></td><td>Push to all matched providers</td></tr>
+          <tr><td><span class="method method-POST">POST</span></td><td><code>/api/v1/ServiceRequest/&lt;guid&gt;/push/&lt;match_guid&gt;</code></td><td><span class="scope-pill">read_write</span></td><td>Push to one specific match</td></tr>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/ServiceRequest/&lt;guid&gt;/receipts</code></td><td><span class="scope-pill">any</span></td><td>List dispatch receipts for this SR</td></tr>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/ServiceRequest/receipt/&lt;token&gt;</code></td><td><span class="scope-pill">any</span></td><td>Read one receipt by its token</td></tr>
+          <tr><td><span class="method method-POST">POST</span></td><td><code>/api/v1/ServiceRequest/receipt/&lt;token&gt;/respond</code></td><td><span class="scope-pill">read_write</span></td><td>Provider response inbound</td></tr>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/ServiceRequest/&lt;guid&gt;/forms</code></td><td><span class="scope-pill">any</span></td><td>List forms attached to this SR</td></tr>
+          <tr><td><span class="method method-POST">POST</span></td><td><code>/api/v1/ServiceRequest/&lt;guid&gt;/forms</code></td><td><span class="scope-pill">read_write</span></td><td>Attach a form</td></tr>
+          <tr><td><span class="method method-DELETE">DELETE</span></td><td><code>/api/v1/ServiceRequest/&lt;guid&gt;/forms/&lt;form_sr_guid&gt;</code></td><td><span class="scope-pill">read_write</span></td><td>Detach a form</td></tr>
+          <tr><td><span class="method method-POST">POST</span></td><td><code>/api/v1/ServiceRequest/&lt;guid&gt;/forms/reorder</code></td><td><span class="scope-pill">read_write</span></td><td>Reorder attached forms</td></tr>
+        </tbody>
+      </table>
+
+      <h3>5.3 Validation errors (422)</h3>
+      <table>
+        <thead><tr><th><code>code</code></th><th>Cause</th></tr></thead>
+        <tbody>
+          <tr><td><code>contract_not_active</code></td><td>Referenced contract has <code>status != "executed"</code></td></tr>
+          <tr><td><code>concept_out_of_scope</code></td><td>A <code>transactions[].concept_canonical</code> not in the contract's return_scope</td></tr>
+          <tr><td><code>provider_mismatch</code></td><td>Performer org isn't the contract's provider party</td></tr>
+          <tr><td><code>patient_not_cached</code></td><td>Subject patient hasn't been cached locally yet</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="api-section" id="fhir-readonly">
+      <h2>6) Form, PlanDefinition, Contract (read-only proxies)</h2>
+      <table>
+        <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/Form</code></td><td>List forms</td></tr>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/Form/&lt;guid&gt;</code></td><td>Read one form</td></tr>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/PlanDefinition</code></td><td>List plan-definitions known to this gateway</td></tr>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/Contract</code></td><td>List contracts (auth-filtered; full source in contract.pdhc)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="api-section" id="careplan">
+      <h2>7) CarePlan</h2>
+      <table>
+        <thead><tr><th>Method</th><th>Path</th><th>Role</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/CarePlan</code></td><td><span class="scope-pill">any</span></td><td>List care plans (org-filtered)</td></tr>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/CarePlan/&lt;guid&gt;</code></td><td><span class="scope-pill">any</span></td><td>Full care plan + nested SRs</td></tr>
+          <tr><td><span class="method method-POST">POST</span></td><td><code>/api/v1/CarePlan/&lt;guid&gt;/dispatch</code></td><td><span class="scope-pill">clinical-lead</span></td><td>Force-dispatch all SRs in this care plan</td></tr>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/CarePlan/&lt;guid&gt;/dispatch/&lt;receipt_token&gt;</code></td><td><span class="scope-pill">any</span></td><td>Read a single dispatch receipt by token</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="api-section" id="export">
+      <h2>8) Export</h2>
+      <table>
+        <thead><tr><th>Method</th><th>Path</th><th>Role</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/CarePlan/&lt;guid&gt;/export/preview</code></td><td><span class="scope-pill">any</span></td><td>Preview rows (no download)</td></tr>
+          <tr><td><span class="method method-POST">POST</span></td><td><code>/api/v1/CarePlan/&lt;guid&gt;/export/csv</code></td><td><span class="scope-pill">read_write</span></td><td>Stream CSV (clinical-lead reporting)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="api-section" id="requests">
+      <h2>9) Requests (queue / reporting)</h2>
+      <p>Lightweight read-only listing that joins ServiceRequest + dispatch state for the UI's "Requests" tab.</p>
+      <table>
+        <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/requests</code></td><td>List with status + dispatch summary</td></tr>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/requests/&lt;guid&gt;</code></td><td>One row, expanded</td></tr>
+          <tr><td><span class="method method-PUT">PUT</span></td><td><code>/api/v1/requests/&lt;guid&gt;/status</code></td><td>Mutate status (limited transitions)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="api-section" id="provider">
+      <h2>10) Provider feed (PAT-authenticated)</h2>
+      <p>Called by <strong>providers</strong>, not by the SSU operator UI. Auth header: <code>X-Provider-Token: &lt;PAT&gt;</code> — never the SSO Bearer.</p>
+
+      <h3><span class="method method-GET">GET</span> <code>/api/v1/provider/feed</code></h3>
+      <p>Lists SRs addressed to this provider — <strong>metadata only</strong>, no patient data (GDPR data minimisation). Query params: <code>since</code>, <code>limit</code> (max 200).</p>
+
+      <h3><span class="method method-GET">GET</span> <code>/api/v1/provider/download/&lt;sr_guid&gt;</code></h3>
+      <p>Returns the full FHIR Bundle for one SR. Issues a fresh <code>DataExchangeGrant</code> if none exists.</p>
+
+      <h3><span class="method method-POST">POST</span> <code>/api/v1/provider/report/&lt;sr_guid&gt;</code></h3>
+      <p>Inbound report submission. Required body fields: <code>patient_guid</code>, <code>organisation_guid</code>, <code>grant_token</code>, <code>contract_guid</code>, plus optional <code>status</code> (default <code>completed</code>) and <code>report_payload</code>. Returns 403 if <code>organisation_guid</code> doesn't match the PAT's provider.</p>
+
+      <h3><span class="method method-POST">POST</span> <code>/api/v1/provider/validate-token</code></h3>
+      <p><span class="auth-mode">public</span> — the token <em>is</em> the credential. Called by gateway.pdhc to resolve a raw PAT into provider identity (org_guid, contract_guid, delivery_mode, push_endpoint_url, push_auth_key).</p>
+
+      <h3><span class="method method-POST">POST</span> <code>/api/v1/provider/receipt/&lt;token&gt;/ack</code></h3>
+      <p>Acknowledges a push-mode delivery receipt.</p>
+    </div>
+
+    <div class="api-section" id="providers">
+      <h2>11) Providers (directory)</h2>
+      <h3><span class="method method-GET">GET</span> <code>/api/v1/providers</code></h3>
+      <p>Lists provider organisations registered with this gateway. SU-admin unrestricted; non-SU sees only providers their org has contracts with.</p>
+    </div>
+
+    <div class="api-section" id="admin">
+      <h2>12) Admin — provider tokens</h2>
+      <p>SU-admin or org-admin only.</p>
+      <table>
+        <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method method-POST">POST</span></td><td><code>/api/v1/admin/provider-tokens</code></td><td>Issue new PAT</td></tr>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/admin/provider-tokens</code></td><td>List PATs (filter by provider/contract)</td></tr>
+          <tr><td><span class="method method-DELETE">DELETE</span></td><td><code>/api/v1/admin/provider-tokens/&lt;guid&gt;</code></td><td>Revoke a PAT</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="api-section" id="internal">
+      <h2>13) Internal — service-to-service</h2>
+      <p>Service-key auth only (<code>X-Service-Key</code>). Never exposed externally.</p>
+
+      <h3><span class="method method-GET">GET</span> <code>/api/v1/internal/service-request/&lt;sr_guid&gt;/context</code></h3>
+      <p>Returns the pre-extracted SR context (transactions, goals, patient_guid, contract_guid) so gateway.pdhc can enrich incoming observations without re-reading the SR.</p>
+
+      <h3><span class="method method-POST">POST</span> <code>/api/v1/internal/grant/validate</code></h3>
+      <p>Body: <code>{ "sr_guid", "org_guid", "patient_guid", "grant_token", "contract_guid"? }</code>. Returns:</p>
+      <pre><code>{
+  "valid": true,
+  "contract_guid": "...",
+  "grant_type": "pull|push",
+  "uses_remaining": 1
+}</code></pre>
+      <p>Used by gateway.pdhc to validate inbound observations without ever holding <code>HMAC_SECRET</code> itself.</p>
+
+      <h3><span class="method method-POST">POST</span> <code>/api/v1/internal/auto-provision-pat</code></h3>
+      <p>Called by contract.pdhc when a contract is created/updated; provisions a PAT for the provider org if one doesn't already exist. Required body: <code>provider_org_guid</code>, <code>contract_guid</code>. Pulls push-config from sso.pdhc and decides delivery_mode (push vs poll) accordingly.</p>
+    </div>
+
+    <div class="api-section" style="background: #f8fafc;">
+      <p style="margin:0;"><i data-lucide="external-link"></i>
+        Cross-references: <a href="https://contract.pdhc.se/docs">contract.pdhc docs</a> · <a href="https://termbank.pdhc.se/fhir/metadata">termbank.pdhc CapabilityStatement</a> · <a href="{{ url_for('docs.docs_index') }}">request.pdhc manuals + runbooks</a>
+      </p>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
