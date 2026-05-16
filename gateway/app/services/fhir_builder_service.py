@@ -54,7 +54,7 @@ def _build_careplan(sr_model, snapshot, patient_name):
     # PlanDefinition reference
     if sr_model.plan_definition_guid:
         careplan['instantiatesCanonical'] = [
-            f'PlanDefinition/{sr_model.plan_definition_guid}'
+            f'https://plan.pdhc.se/api/v1/plandefinitions/{sr_model.plan_definition_guid}'
         ]
 
     # Build goals
@@ -77,7 +77,7 @@ def _build_careplan(sr_model, snapshot, patient_name):
 
         if g.get('concept_guid'):
             fhir_goal['description']['coding'] = [{
-                'system': 'https://pdhc.se/concepts',
+                'system': 'https://plan.pdhc.se/api/v1/concepts',
                 'code': g['concept_guid'],
                 'display': g.get('concept_name', ''),
             }]
@@ -124,7 +124,7 @@ def _build_careplan(sr_model, snapshot, patient_name):
                 for txn in txns:
                     if txn.get('concept_guid'):
                         code_coding.append({
-                            'system': 'https://pdhc.se/concepts',
+                            'system': 'https://plan.pdhc.se/api/v1/concepts',
                             'code': txn['concept_guid'],
                             'display': txn.get('concept_name', ''),
                         })
@@ -153,6 +153,17 @@ def _build_careplan(sr_model, snapshot, patient_name):
                 if act_data.get('duration_value'):
                     repeat['duration'] = act_data['duration_value']
                     repeat['durationUnit'] = act_data.get('duration_unit') or 'min'
+                bounds_mode = act_data.get('timing_bounds_mode')
+                if bounds_mode == 'count' and act_data.get('timing_bounds_count'):
+                    repeat['count'] = act_data['timing_bounds_count']
+                elif bounds_mode == 'duration' and act_data.get('timing_bounds_duration_value'):
+                    unit = act_data.get('timing_bounds_duration_unit') or 'mo'
+                    repeat['boundsDuration'] = {
+                        'value': act_data['timing_bounds_duration_value'],
+                        'unit': unit,
+                        'system': 'http://unitsofmeasure.org',
+                        'code': unit,
+                    }
                 detail['scheduledTiming'] = {'repeat': repeat}
             elif timing_type == 'once' and act_data.get('duration_value'):
                 detail['scheduledTiming'] = {
@@ -184,17 +195,27 @@ def _build_careplan(sr_model, snapshot, patient_name):
 
             activity = {'detail': detail}
 
-            if len(txns) > 1:
+            activity_guid = act_data.get('guid', '')
+            if txns:
+                activity['_pdhc_activity_guid'] = activity_guid
                 activity['_pdhc_transactions'] = []
                 for txn in txns:
                     txn_entry = {}
+                    # transaction_guid is the stable plan-level ID the
+                    # gateway keys its txn_map on.  Fall back to
+                    # concept_guid for snapshots that predate per-txn GUIDs.
+                    txn_entry['transaction_guid'] = txn.get('guid') or txn.get('concept_guid', '')
+                    txn_entry['activity_guid'] = activity_guid
                     if txn.get('concept_guid'):
                         txn_entry['concept_guid'] = txn['concept_guid']
                         txn_entry['concept_name'] = txn.get('concept_name', '')
+                        txn_entry['concept_url'] = f'https://plan.pdhc.se/api/v1/concepts/{txn["concept_guid"]}'
                     if txn.get('requirement_type'):
                         txn_entry['requirement_type'] = txn['requirement_type']
                     if txn.get('expected_value'):
                         txn_entry['expected_value'] = txn['expected_value']
+                    if txn.get('unit'):
+                        txn_entry['unit'] = txn['unit']
                     if txn.get('range_min') is not None:
                         txn_entry['range_min'] = txn['range_min']
                     if txn.get('range_max') is not None:
@@ -268,13 +289,13 @@ def build_service_request_resource(sr_model):
     # PlanDefinition reference
     if sr_model.plan_definition_guid:
         resource['instantiatesCanonical'] = [
-            f'PlanDefinition/{sr_model.plan_definition_guid}'
+            f'https://plan.pdhc.se/api/v1/plandefinitions/{sr_model.plan_definition_guid}'
         ]
 
     # Contract reference
     if sr_model.contract_guid:
         resource['basedOn'] = [{
-            'reference': f'Contract/{sr_model.contract_guid}',
+            'reference': f'https://contract.pdhc.se/fhir/Contract/{sr_model.contract_guid}',
         }]
 
     # Requester organisation
