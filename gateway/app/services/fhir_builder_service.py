@@ -96,10 +96,16 @@ def _build_careplan(sr_model, snapshot, patient_name):
             unit_name = g.get('target_unit_name')
 
             def _qty(value):
+                # Route the unit reference through plan.pdhc rather than
+                # emitting UCUM directly, per the platform principle that
+                # only plan.pdhc may emit external code-system refs. The
+                # plan.pdhc unit_name happens to be UCUM-compatible so
+                # consumers can still interpret it, but the identity of
+                # the unit is anchored in plan.pdhc's catalog.
                 q = {'value': value}
                 if unit_name:
                     q['unit'] = unit_name
-                    q['system'] = 'http://unitsofmeasure.org'
+                    q['system'] = 'https://plan.pdhc.se/api/v1/lookup/units'
                     q['code'] = unit_name
                 return q
 
