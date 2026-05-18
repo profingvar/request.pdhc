@@ -90,18 +90,41 @@ def _build_careplan(sr_model, snapshot, patient_name):
         target_type = g.get('target_type')
         if target_type:
             target = {}
+            # Helper: build a FHIR Quantity with UCUM system+code from
+            # the enriched snapshot field target_unit_name (plan.pdhc
+            # writes the UCUM code into the goal JSON on save).
+            unit_name = g.get('target_unit_name')
+
+            def _qty(value):
+                q = {'value': value}
+                if unit_name:
+                    q['unit'] = unit_name
+                    q['system'] = 'http://unitsofmeasure.org'
+                    q['code'] = unit_name
+                return q
+
             if target_type == 'quantity' and g.get('target_quantity') is not None:
-                target['detailQuantity'] = {'value': g['target_quantity']}
+                target['detailQuantity'] = _qty(g['target_quantity'])
                 if g.get('target_operator'):
                     target['detailQuantity']['comparator'] = g['target_operator']
             elif target_type == 'range':
                 target['detailRange'] = {}
                 if g.get('target_range_low') is not None:
-                    target['detailRange']['low'] = {'value': g['target_range_low']}
+                    target['detailRange']['low'] = _qty(g['target_range_low'])
                 if g.get('target_range_high') is not None:
-                    target['detailRange']['high'] = {'value': g['target_range_high']}
+                    target['detailRange']['high'] = _qty(g['target_range_high'])
             elif target_type == 'categorical' and g.get('target_categorical_text'):
-                target['detailCodeableConcept'] = {'text': g['target_categorical_text']}
+                cc = {'text': g['target_categorical_text']}
+                vs_guid = g.get('target_categorical_valueset')
+                if vs_guid:
+                    coding = {
+                        'system': f'https://plan.pdhc.se/api/v1/valuesets/{vs_guid}',
+                        'code': g.get('target_categorical_code') or g['target_categorical_text'],
+                    }
+                    if g.get('target_categorical_display'):
+                        coding['display'] = g['target_categorical_display']
+                    cc['coding'] = [coding]
+                target['detailCodeableConcept'] = cc
             if target:
                 fhir_goal['target'] = [target]
 
