@@ -124,7 +124,7 @@ def _build_careplan(sr_model, snapshot, patient_name):
                 vs_guid = g.get('target_categorical_valueset')
                 if vs_guid:
                     coding = {
-                        'system': f'https://plan.pdhc.se/api/v1/valuesets/{vs_guid}',
+                        'system': f'https://plan.pdhc.se/api/v1/lookup/valuesets/{vs_guid}',
                         'code': g.get('target_categorical_code') or g['target_categorical_text'],
                     }
                     if g.get('target_categorical_display'):
