@@ -204,9 +204,20 @@ def _build_careplan(sr_model, snapshot, patient_name):
 
             if txns:
                 first_txn = txns[0]
+                # Wrap a numeric value in a FHIR Quantity that routes its
+                # unit identity through plan.pdhc rather than emitting UCUM
+                # directly (same routing as goal target _qty above).
+                txn_unit = first_txn.get('unit')
+                def _txn_qty(value):
+                    q = {'value': value}
+                    if txn_unit:
+                        q['unit'] = txn_unit
+                        q['system'] = 'https://plan.pdhc.se/api/v1/lookup/units'
+                        q['code'] = txn_unit
+                    return q
                 if first_txn.get('expected_value'):
                     try:
-                        detail['quantity'] = {'value': float(first_txn['expected_value'])}
+                        detail['quantity'] = _txn_qty(float(first_txn['expected_value']))
                     except (ValueError, TypeError):
                         pass
                 if first_txn.get('range_min') is not None or first_txn.get('range_max') is not None:
@@ -215,9 +226,9 @@ def _build_careplan(sr_model, snapshot, patient_name):
                         'valueRange': {},
                     }]
                     if first_txn.get('range_min') is not None:
-                        detail['extension'][0]['valueRange']['low'] = {'value': first_txn['range_min']}
+                        detail['extension'][0]['valueRange']['low'] = _txn_qty(first_txn['range_min'])
                     if first_txn.get('range_max') is not None:
-                        detail['extension'][0]['valueRange']['high'] = {'value': first_txn['range_max']}
+                        detail['extension'][0]['valueRange']['high'] = _txn_qty(first_txn['range_max'])
 
             if goal_refs:
                 detail['goal'] = list(goal_refs)
