@@ -512,7 +512,137 @@ app/templates/service_requests/         — list, create, view, edit_plan
 
 ---
 
-## 14) Short Operational Summary
+## 14) Provider API and DataExchangeGrant
+
+### 14.1 Provider Access Tokens (PAT)
+
+Providers authenticate to the gateway using **Provider Access Tokens** — opaque bearer tokens issued per provider organization and contract. Each PAT carries:
+
+- `provider_org_guid` — the provider's organisation identity
+- `contract_guid` — the governing contract
+- `scopes` — `read`, `write`, or both
+- `delivery_mode` — `pull` (provider polls) or `push` (gateway delivers)
+
+PAT validation endpoint (internal, no auth — the token IS the credential):
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/provider/validate-token` | Validate a raw PAT, returns provider identity |
+
+### 14.2 Provider Feed and Download
+
+Providers access their ServiceRequests through pull endpoints:
+
+| Method | Path | Scope | Description |
+|--------|------|-------|-------------|
+| GET | `/api/v1/provider/feed` | read | List SRs addressed to this provider (metadata only, no patient data — GDPR data minimization) |
+| GET | `/api/v1/provider/download/{sr_guid}` | read | Download full FHIR Bundle for a specific SR; issues a DataExchangeGrant if none exists |
+
+### 14.3 Provider Report Submission
+
+Providers submit responses (reports) back through **gateway.pdhc** (not directly to request.pdhc):
+
+| Method | Path | Scope | Description |
+|--------|------|-------|-------------|
+| POST | `/api/v1/provider/report/{sr_guid}` | write | Submit a report/response for a ServiceRequest |
+| POST | `/api/v1/provider/receipt/{token}/ack` | write | Acknowledge a push delivery receipt |
+
+**Minimal report request body:**
+
+```json
+{
+  "patient_guid": "required — must match the SR subject",
+  "grant_token": "required — the DataExchangeGrant token",
+  "status": "completed | accepted | rejected (default: completed)",
+  "report_payload": { "...FHIR QuestionnaireResponse or observations..." }
+}
+```
+
+**Removed from body**: `organisation_guid` and `contract_guid` are no longer required. The gateway derives `organisation_guid` from the PAT (X-Provider-Token) and `contract_guid` from the grant validation response. If provided in the body, they are cross-checked for backward compatibility but not required.
+
+**Observation format (minimal):**
+
+```json
+{
+  "observations": [
+    {
+      "transaction_guid": "tx-001",
+      "value": "42",
+      "recorded_at": "2026-03-25T14:30:00Z",
+      "notes": "optional — omit if empty"
+    }
+  ]
+}
+```
+
+Providers do **not** send `concept_guid` or `unit` — the gateway derives these from the SR context transaction map.
+
+### 14.4 DataExchangeGrant Model
+
+The DataExchangeGrant provides **HMAC-based composite key validation** for report submissions. A grant is created when a provider downloads a ServiceRequest bundle or when a bundle is pushed to a provider.
+
+**Grant composition:**
+
+- `service_request_guid` — the SR being reported on
+- `patient_guid` — the data subject
+- `provider_org_guid` — the authorized provider
+- `contract_guid` — the governing contract (empty string for direct delivery)
+- `expires_at` — grant expiry timestamp
+- `grant_token` — HMAC-SHA256 signature of all above fields
+
+**HMAC secret location:** The HMAC secret (`HMAC_SECRET`) is held **only** by request.pdhc. Gateway.pdhc never sees or stores the secret — it delegates grant validation to request.pdhc via an internal API.
+
+**Internal APIs (consumed by gateway.pdhc):**
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/internal/grant/validate` | X-Service-Key | Validate a grant token; returns contract_guid, grant_type, uses_remaining |
+| GET | `/internal/service-request/{guid}/context` | X-Service-Key | Fetch pre-extracted SR context (transactions, goals, patient_guid, contract_guid) |
+
+**Validation chain (defense in depth — executed by gateway.pdhc):**
+
+1. PAT validates provider identity → derives `organisation_guid`
+2. Grant token validated by request.pdhc → returns `contract_guid`, `grant_type`
+3. SR context fetched from request.pdhc → transactions, patient, goals
+4. Patient cross-check: body `patient_guid` must match SR subject
+5. Observation enrichment: `concept_guid` and `unit` derived from SR transaction map
+6. Observation validation: values checked against transaction definitions
+7. Contract scope enforcement: concepts checked against contract.pdhc return_scope
+8. Grant use recorded for audit trail
+
+### 14.5 Dual Delivery Paths
+
+The gateway supports two distinct delivery and response paths:
+
+**Contract-matched provider delivery:**
+- Provider has a contract registered in contract.pdhc
+- ServiceRequestContractMatch record links SR → provider → contract
+- Report submission updates the match record with response status and payload
+- Full contract traceability chain
+
+**Direct 1177 delivery:**
+- ServiceRequest is pushed directly to 1177.pdhc via webhook
+- No ServiceRequestContractMatch record exists
+- `contract_guid` is empty string in grant and report
+- Grant token validation is the sole authorization mechanism
+- Report submission stores the response on the SR directly
+
+Both paths use the same `/api/v1/provider/report/{sr_guid}` endpoint. The gateway detects the path by whether a contract match exists.
+
+### 14.6 Form Dispatch to 1177
+
+When a ServiceRequest contains Questionnaire forms, the push service delivers them to 1177.pdhc:
+
+1. Forms linked to the SR are resolved to their FHIR Questionnaire snapshots
+2. Questionnaires are injected as **contained resources** in the ServiceRequest (not as separate Binary Bundle entries)
+3. The FHIR Bundle is POSTed to `POST {1177_URL}/api/webhook/inbound` with:
+   - `X-API-Key` header for webhook authentication
+   - Bundle metadata tags: `grant_token`, `contract_guid`, `organisation_guid`, `expires_at`
+4. 1177.pdhc creates one Assignment per contained Questionnaire
+
+---
+
+## 15) Short Operational Summary
 
 `request.pdhc` is the combined operational API/service surface for:
 

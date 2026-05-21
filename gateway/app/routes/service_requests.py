@@ -1,16 +1,44 @@
 """Web UI routes for ServiceRequest workflow."""
 
-from flask import Blueprint, render_template, request, redirect, url_for, flash
+import requests as http_requests
+from flask import Blueprint, current_app, render_template, request, redirect, url_for, flash
 from app.middleware.auth_middleware import requires_auth, requires_role
 from app.services import (
     service_request_service, patient_service,
     plan_definition_service, contract_service, form_service,
 )
-from app.services.match_service import find_and_create_matches, list_matches_for_request
+from app.services.match_service import (
+    find_and_create_matches, find_eligible_providers,
+    dispatch_to_provider, list_matches_for_request,
+)
 from app.services.push_service import push_all_matches, list_receipts_for_request
 from app.services.auth_service import get_current_user_guid, get_current_access_blob
 
 service_requests_web_bp = Blueprint('service_requests_web', __name__)
+
+
+_SSO_ORG_CACHE = {}
+
+
+def _get_sso_org_name(org_guid):
+    """Resolve org_guid → name via SSO public catalog (cached per process)."""
+    if not org_guid:
+        return None
+    if org_guid in _SSO_ORG_CACHE:
+        return _SSO_ORG_CACHE[org_guid]
+    try:
+        sso_base = current_app.config.get(
+            'SSO_INTERNAL_URL', current_app.config.get('SSO_BASE_URL', '')
+        ).rstrip('/')
+        resp = http_requests.get(f"{sso_base}/api/public/organisations", timeout=5)
+        if resp.status_code == 200:
+            for o in resp.json() or []:
+                gid = o.get('organisation_guid') or o.get('guid') or ''
+                if gid:
+                    _SSO_ORG_CACHE[gid] = o.get('name', '')
+    except http_requests.RequestException:
+        pass
+    return _SSO_ORG_CACHE.get(org_guid)
 
 
 def _patient_matches_org(patient, org_ids):
@@ -196,6 +224,10 @@ def view_detail(guid):
         flash('ServiceRequest not found', 'danger')
         return redirect(url_for('service_requests_web.list_view'))
 
+    # Backfill missing org name from SSO public catalog
+    if data.get('requester_org_guid') and not data.get('requester_org_name'):
+        data['requester_org_name'] = _get_sso_org_name(data['requester_org_guid'])
+
     matches_data, _ = list_matches_for_request(guid)
     matches = matches_data.get('matches', []) if isinstance(matches_data, dict) else []
 
@@ -204,6 +236,30 @@ def view_detail(guid):
 
     forms_data, _ = service_request_service.list_forms_for_request(guid)
     sr_forms = forms_data.get('forms', []) if isinstance(forms_data, dict) else []
+
+    # Resolve contract name from contract.pdhc
+    contract_name = None
+    contract_names = {}
+    if data.get('contract_guid'):
+        c_data, c_status = contract_service.get_contract(data['contract_guid'])
+        if c_status == 200 and isinstance(c_data, dict):
+            contract_name = c_data.get('name') or c_data.get('title')
+            contract_names[data['contract_guid']] = contract_name
+
+    # Build contract name lookup for matches
+    for m in matches:
+        cg = m.get('contract_guid', '')
+        if cg and cg not in contract_names:
+            c_data, c_status = contract_service.get_contract(cg)
+            if c_status == 200 and isinstance(c_data, dict):
+                contract_names[cg] = c_data.get('name') or c_data.get('title') or ''
+
+    # Find eligible providers for active SRs (two-step dispatch)
+    eligible = []
+    if data.get('status') == 'active':
+        elig_data, elig_status = find_eligible_providers(guid)
+        if elig_status == 200:
+            eligible = elig_data.get('eligible', [])
 
     # If draft, also fetch catalogue for add-form picker
     available_forms = []
@@ -215,7 +271,9 @@ def view_detail(guid):
             available_forms = cat_data
 
     return render_template('service_requests/view.html', sr=data, matches=matches,
-                           receipts=receipts, sr_forms=sr_forms, available_forms=available_forms)
+                           receipts=receipts, sr_forms=sr_forms, available_forms=available_forms,
+                           contract_name=contract_name, contract_names=contract_names,
+                           eligible_providers=eligible)
 
 
 @service_requests_web_bp.route('/service-requests/<guid>/edit-plan', methods=['GET', 'POST'])
@@ -336,7 +394,7 @@ def revoke_view(guid):
 @requires_auth
 @requires_role('read_write')
 def find_matches_view(guid):
-    """Find matching contracts for an active ServiceRequest."""
+    """Find matching contracts for an active ServiceRequest (legacy)."""
     data, status = find_and_create_matches(
         service_request_guid=guid,
         user_guid=get_current_user_guid(),
@@ -345,6 +403,34 @@ def find_matches_view(guid):
     if status == 200:
         count = data.get('matches_created', 0)
         flash(f'{count} contract match(es) found', 'success')
+    else:
+        flash(f"Error: {data.get('message', 'Unknown')}", 'danger')
+    return redirect(url_for('service_requests_web.view_detail', guid=guid))
+
+
+@service_requests_web_bp.route('/service-requests/<guid>/dispatch', methods=['POST'])
+@requires_auth
+@requires_role('read_write')
+def dispatch_view(guid):
+    """Dispatch ServiceRequest to a chosen provider."""
+    contract_guid = request.form.get('contract_guid', '')
+    provider_org_guid = request.form.get('provider_org_guid', '')
+    provider_name = request.form.get('provider_name', '')
+
+    if not contract_guid or not provider_org_guid:
+        flash('Missing contract or provider', 'danger')
+        return redirect(url_for('service_requests_web.view_detail', guid=guid))
+
+    data, status = dispatch_to_provider(
+        service_request_guid=guid,
+        contract_guid=contract_guid,
+        provider_org_guid=provider_org_guid,
+        provider_name=provider_name,
+        user_guid=get_current_user_guid(),
+        ip_address=request.remote_addr,
+    )
+    if status == 200:
+        flash(f'Dispatched to {provider_name or provider_org_guid}', 'success')
     else:
         flash(f"Error: {data.get('message', 'Unknown')}", 'danger')
     return redirect(url_for('service_requests_web.view_detail', guid=guid))

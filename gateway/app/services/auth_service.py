@@ -58,8 +58,34 @@ def validate_sso_token(token):
         return None
 
 
+def _clear_sso_session():
+    """Drop all SSO state and log out the Flask-Login user.
+
+    Called when SSO rejects a previously valid token (session flush,
+    password reset, expiry, etc.). Next request will see an
+    unauthenticated user and be redirected to /login.
+    """
+    session.pop('sso_token', None)
+    session.pop('access_blob', None)
+    try:
+        from flask_login import logout_user
+        logout_user()
+    except Exception:
+        pass
+
+
 def get_current_access_blob():
-    """Get the access blob from the current session."""
+    """Get the SSO access blob, re-validated against SSO on every call.
+
+    Ticket #50: no caching. `session['access_blob']` is retained only as a
+    display-side convenience and refreshed from each fresh /me/service
+    response. All authorisation decisions MUST flow through this function
+    so that SSO-side session flushes (SSO ticket #44) and forced password
+    resets (SSO ticket #43) take effect immediately.
+
+    Returns the blob on success, or None if the token is missing, expired,
+    or revoked (in which case the local session is wiped).
+    """
     if current_app.config.get('AUTH_DISABLED'):
         return {
             'user_guid': 'dev-admin-guid',
@@ -70,7 +96,16 @@ def get_current_access_blob():
             'organization_ids': [],
             'groups': [],
         }
-    return session.get('access_blob')
+    token = session.get('sso_token')
+    if not token:
+        return None
+    blob = validate_sso_token(token)
+    if blob is None:
+        _clear_sso_session()
+        return None
+    # Display-only refresh; never trusted for authz.
+    session['access_blob'] = blob
+    return blob
 
 
 def get_current_user_guid():

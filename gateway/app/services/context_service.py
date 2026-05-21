@@ -12,9 +12,9 @@ def get_sr_context(sr_guid):
     if not sr:
         return None
 
-    fhir = sr.fhir_resource or {}
-    transactions = _extract_transactions(fhir)
-    goals = _extract_goals(fhir)
+    snapshot = sr.plan_definition_snapshot or {}
+    transactions = _extract_transactions(snapshot)
+    goals = _extract_goals(sr.fhir_resource or {})
 
     return {
         'service_request_guid': sr.guid,
@@ -32,27 +32,90 @@ def get_sr_context(sr_guid):
     }
 
 
-def _extract_transactions(fhir_resource):
-    """Extract transaction list from contained CarePlan._pdhc_transactions."""
-    contained = fhir_resource.get('contained', [])
-    for resource in contained:
-        if resource.get('resourceType') != 'CarePlan':
-            continue
-        transactions = []
-        for tx in resource.get('_pdhc_transactions', []):
+def _infer_response_type(tx):
+    """Infer gateway-compatible response_type from a plan transaction.
+
+    Plan.pdhc's transaction model does not carry an explicit response_type
+    today, but gateway's ObservationValidator requires one. Infer from
+    the shape of the expected value:
+      - numeric range or expected numeric → 'numeric'
+      - unit present (typical of numeric measurements) → 'numeric'
+      - otherwise → 'text' (safe fallback the validator accepts)
+    """
+    if tx.get('range_min') is not None or tx.get('range_max') is not None:
+        return 'numeric'
+    ev = tx.get('expected_value')
+    if isinstance(ev, (int, float)):
+        return 'numeric'
+    if isinstance(ev, str):
+        try:
+            float(ev)
+            return 'numeric'
+        except (ValueError, TypeError):
+            pass
+    if tx.get('unit'):
+        return 'numeric'
+    return 'text'
+
+
+def _extract_transactions(snapshot):
+    """Extract flat transaction list from a PlanDefinition snapshot.
+
+    The snapshot is the JSON that plan.pdhc hands down at SR-creation
+    time. Its shape is:
+        {goals: [...],
+         activities: [{goal_guid, goal_concept_guid,
+                       transactions: [{guid, concept_guid, goal_guid,
+                                       goal_concept_guid, range_min, ...}]}]}
+
+    Gateway needs a flat list keyed by `transaction_guid`, which in plan
+    snapshots lives in the `guid` field. We also synthesise `response_type`
+    (see `_infer_response_type`) because plan.pdhc's transaction schema
+    has no equivalent field, and we carry the **goal** concept forward
+    so downstream enrichment can tag observations with the *measurement*
+    concept (e.g. B-glucos) instead of the transaction's *procedure*
+    concept (e.g. CGM). This is what contract-scope validation checks.
+
+    Back-compat fallback: if the snapshot predates the plan.pdhc edit
+    that writes `goal_guid`/`goal_concept_guid` onto each transaction,
+    infer from a single top-level goal.
+    """
+    top_goals = snapshot.get('goals', []) or []
+    fallback_goal_guid = top_goals[0].get('guid') if len(top_goals) == 1 else None
+    fallback_goal_concept = top_goals[0].get('concept_guid') if len(top_goals) == 1 else None
+    fallback_goal_concept_name = top_goals[0].get('concept_name') if len(top_goals) == 1 else None
+
+    transactions = []
+    for activity in snapshot.get('activities', []) or []:
+        activity_goal_guid = activity.get('goal_guid') or fallback_goal_guid
+        activity_goal_concept = activity.get('goal_concept_guid') or fallback_goal_concept
+        activity_goal_concept_name = activity.get('goal_concept_name') or fallback_goal_concept_name
+        for tx in activity.get('transactions', []) or []:
+            txn_guid = tx.get('guid')
+            # Snapshots built from older plan.pdhc versions may lack a
+            # `guid` per transaction. Fall back to `concept_guid` so the
+            # transaction still appears in the map — gateway's single-txn
+            # fallback or concept-based matching can then resolve it.
+            if not txn_guid:
+                txn_guid = tx.get('concept_guid')
+            if not txn_guid:
+                continue
             transactions.append({
-                'transaction_guid': tx.get('transaction_guid'),
+                'transaction_guid': txn_guid,
                 'concept_guid': tx.get('concept_guid'),
                 'concept_name': tx.get('concept_name', ''),
+                'goal_guid': tx.get('goal_guid') or activity_goal_guid,
+                'goal_concept_guid': tx.get('goal_concept_guid') or activity_goal_concept,
+                'goal_concept_name': tx.get('goal_concept_name') or activity_goal_concept_name,
                 'unit': tx.get('unit'),
                 'unit_display': tx.get('unit_display', ''),
                 'expected_value': tx.get('expected_value'),
                 'range_min': tx.get('range_min'),
                 'range_max': tx.get('range_max'),
-                'requirement_type': tx.get('requirement_type', 'required'),
+                'requirement_type': tx.get('requirement_type') or 'required',
+                'response_type': _infer_response_type(tx),
             })
-        return transactions
-    return []
+    return transactions
 
 
 def _extract_goals(fhir_resource):

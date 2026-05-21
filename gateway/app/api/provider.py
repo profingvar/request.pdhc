@@ -63,13 +63,19 @@ def download(sr_guid):
     return jsonify(data), status
 
 
-@provider_bp.route('/provider/report/<sr_guid>', methods=['POST'])
-@requires_provider_token(scope='write')
-def report(sr_guid):
-    """Submit a report/response for a ServiceRequest.
+def _handle_status_update(sr_guid):
+    """Shared handler for status-update submissions.
 
-    Requires the composite key: patient_guid, contract_guid,
-    organisation_guid, grant_token.
+    NOTE on naming: this endpoint records ServiceRequest LIFECYCLE state
+    (in-progress / completed / etc.) on request.pdhc — it is NOT for
+    observation data. Observation data must be POSTed to
+    `gateway.pdhc /api/v1/provider/report/<sr_guid>` which writes
+    InboundObservation rows after PAT + grant + SR-context validation.
+
+    A payload sent here is stored on the contract-match for audit but
+    will NEVER reach inbound_observations. Providers that conflated the
+    two endpoints have silently lost observation data — see the
+    /provider/report alias below.
     """
     from app.services.report_service import submit_report
 
@@ -115,6 +121,48 @@ def report(sr_guid):
     return jsonify(data), status
 
 
+@provider_bp.route('/provider/status/<sr_guid>', methods=['POST'])
+@requires_provider_token(scope='write')
+def status_update(sr_guid):
+    """Submit a lifecycle status update for a ServiceRequest (canonical path).
+
+    Requires the composite key: patient_guid, contract_guid,
+    organisation_guid, grant_token.
+
+    For observation DATA, POST to `gateway.pdhc /api/v1/provider/report/<sr_guid>`
+    instead — that path writes inbound_observations after full validation.
+    """
+    return _handle_status_update(sr_guid)
+
+
+@provider_bp.route('/provider/report/<sr_guid>', methods=['POST'])
+@requires_provider_token(scope='write')
+def report_deprecated_alias(sr_guid):
+    """DEPRECATED alias for /provider/status/<sr_guid>.
+
+    Kept so existing provider integrations don't break, but the path is
+    misnamed — this is a status-update endpoint, not an observation
+    submission endpoint. The same URL on `gateway.pdhc` is the actual
+    report endpoint. See `_handle_status_update`'s docstring.
+
+    Logs a `report.deprecated_alias_used` audit event so we can spot
+    providers still calling the old path before removing it.
+    """
+    log_event(
+        action='report.deprecated_alias_used',
+        resource_type='ServiceRequest',
+        resource_guid=sr_guid,
+        details={
+            'provider_org_guid': g.provider_org_guid,
+            'note': 'Provider POSTed to /provider/report; canonical path is '
+                    '/provider/status (request.pdhc) or /provider/report '
+                    '(gateway.pdhc) for observation data.',
+        },
+        ip_address=request.remote_addr,
+    )
+    return _handle_status_update(sr_guid)
+
+
 @provider_bp.route('/provider/validate-token', methods=['POST'])
 def validate_token():
     """Validate a raw Provider Access Token — called by gateway.pdhc.
@@ -139,6 +187,13 @@ def validate_token():
         'contract_guid': pat.contract_guid,
         'scopes': pat.scopes,
         'delivery_mode': pat.delivery_mode,
+        # Gateway uses these to route receipts back to this specific
+        # provider (instead of a global PROVIDER_SERVICE_URL). The
+        # push_auth_key is the mutual secret the provider expects on
+        # its receipt ingestion endpoint (same value used for X-Push-Secret
+        # on inbound bundles).
+        'push_endpoint_url': pat.push_endpoint_url,
+        'push_auth_key': pat.push_auth_key_encrypted,
     }), 200
 
 

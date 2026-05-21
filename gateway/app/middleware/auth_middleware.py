@@ -1,8 +1,27 @@
 import hmac as hmac_mod
 from functools import wraps
-from flask import current_app, request, jsonify, abort, g
-from flask_login import current_user
+from flask import current_app, request, jsonify, abort, g, redirect
 from app.services.auth_service import get_current_access_blob, map_role, validate_api_key
+
+
+def _sso_change_password_url():
+    base = current_app.config['SSO_BASE_URL'].rstrip('/')
+    return f'{base}/change-password'
+
+
+def _must_change_password_response(blob):
+    """Uniform response when SSO flags `must_change_password=True`.
+    JSON 403 for API paths; redirect to SSO /change-password for HTML.
+    Returns None if no change required."""
+    if not blob or not blob.get('must_change_password'):
+        return None
+    if request.path.startswith('/api/'):
+        return jsonify({
+            'code': 'password_change_required',
+            'message': 'Password change required before further actions',
+            'change_password_url': _sso_change_password_url(),
+        }), 403
+    return redirect(_sso_change_password_url())
 
 
 def _check_provider_token():
@@ -70,12 +89,26 @@ def requires_auth(f):
         api_blob = _check_api_key()
         if api_blob:
             g.api_key_access_blob = api_blob
+            mcp = _must_change_password_response(api_blob)
+            if mcp is not None:
+                return mcp
             return f(*args, **kwargs)
 
-        if not current_user.is_authenticated:
+        # Ticket #50: session-based SSO auth must re-validate every request.
+        # Calling get_current_access_blob() hits SSO /me/service; on failure
+        # it wipes the session and returns None, which flips Flask-Login's
+        # current_user.is_authenticated to False on the next check.
+        blob = get_current_access_blob()
+        if blob is None:
             if request.path.startswith('/api/'):
                 return jsonify({'code': 'unauthenticated', 'message': 'Authentication required'}), 401
             abort(401)
+
+        # Ticket #43 gate.
+        mcp = _must_change_password_response(blob)
+        if mcp is not None:
+            return mcp
+
         return f(*args, **kwargs)
     return decorated
 
@@ -150,12 +183,21 @@ def requires_role(role):
                     return jsonify({'code': 'unauthorized', 'message': 'Insufficient permissions'}), 403
                 return f(*args, **kwargs)
 
-            if not current_user.is_authenticated:
+            # Ticket #50: re-validate with SSO every request. blob==None means
+            # the stored bearer was rejected (expired/revoked/flushed) and the
+            # local session has already been wiped inside get_current_access_blob.
+            blob = get_current_access_blob()
+            if blob is None:
                 if request.path.startswith('/api/'):
                     return jsonify({'code': 'unauthenticated', 'message': 'Authentication required'}), 401
                 abort(401)
 
-            blob = get_current_access_blob()
+            # Ticket #43 gate — must come before the role check so a user
+            # flagged for password reset can't slip through with an admin role.
+            mcp = _must_change_password_response(blob)
+            if mcp is not None:
+                return mcp
+
             user_role = map_role(blob)
             if role_levels.get(user_role, 0) < role_levels.get(role, 0):
                 if request.path.startswith('/api/'):

@@ -36,16 +36,34 @@ def get_contract(guid):
         return {'code': 'upstream_error', 'message': str(e)}, 502
 
 
-def find_matching_contracts(plan_definition_guid=None):
-    """Find contracts that could match a ServiceRequest.
+ACTIVE_CONTRACT_STATUSES = ('executed', 'active', 'offered', 'executable', 'renewed')
 
-    Currently fetches all active contracts. Future: filter by PlanDefinition
-    scope, service type, or provider capabilities.
+
+def find_matching_contracts(plan_definition_guid=None, plan_definition_fhir_id=None):
+    """Find contracts whose topic references the given PlanDefinition.
+
+    Accepts the database guid and/or the FHIR id and matches against either,
+    since contracts may reference whichever was assigned at contract-creation time.
     """
     result, status = list_contracts()
     if status != 200:
         return result, status
 
-    # Filter to active contracts only
-    active = [c for c in result if c.get('status') == 'executed' or c.get('status') == 'active']
-    return active, 200
+    active = [c for c in result if c.get('status') in ACTIVE_CONTRACT_STATUSES]
+
+    if not plan_definition_guid and not plan_definition_fhir_id:
+        return active, 200
+
+    candidate_refs = set()
+    if plan_definition_guid:
+        candidate_refs.add(f'PlanDefinition/{plan_definition_guid}')
+    if plan_definition_fhir_id:
+        candidate_refs.add(f'PlanDefinition/{plan_definition_fhir_id}')
+
+    matched = []
+    for c in active:
+        for topic in c.get('topic', []):
+            if topic.get('reference', '') in candidate_refs:
+                matched.append(c)
+                break
+    return matched, 200

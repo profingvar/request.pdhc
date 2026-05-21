@@ -107,12 +107,19 @@ def validate_grant(service_request_guid, patient_guid, provider_org_guid,
     Returns:
         DataExchangeGrant or None
     """
-    grant = DataExchangeGrant.query.filter_by(
+    # contract_guid is optional — gateway's GrantValidationService doesn't
+    # pass it (it derives contract_guid from the validated grant response).
+    # When the caller does provide it, use it as an extra filter; otherwise
+    # rely on patient+org+sr+grant_token uniqueness and cross-check below.
+    filters = dict(
         service_request_guid=service_request_guid,
         provider_org_guid=provider_org_guid,
-        contract_guid=contract_guid,
         revoked=False,
-    ).first()
+    )
+    if contract_guid:
+        filters['contract_guid'] = contract_guid
+
+    grant = DataExchangeGrant.query.filter_by(**filters).first()
 
     if not grant:
         return None

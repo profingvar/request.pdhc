@@ -207,7 +207,10 @@ def _build_careplan(sr_model, snapshot, patient_name):
                 # Wrap a numeric value in a FHIR Quantity that routes its
                 # unit identity through plan.pdhc rather than emitting UCUM
                 # directly (same routing as goal target _qty above).
-                txn_unit = first_txn.get('unit')
+                # Unit lives canonically on the concept (termdefinition);
+                # plan.pdhc enriches each transaction with concept_unit_name.
+                # Transaction-level unit (if set) acts as an override.
+                txn_unit = first_txn.get('unit') or first_txn.get('concept_unit_name')
                 def _txn_qty(value):
                     q = {'value': value}
                     if txn_unit:

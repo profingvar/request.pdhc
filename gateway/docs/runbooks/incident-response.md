@@ -85,7 +85,9 @@ Common causes:
 
 ## 4) Provider reports being rejected at gateway
 
-Symptom: provider sees `/api/v1/provider/report/<sr_guid>` returning 4xx.
+Symptom: provider sees `gateway.pdhc/api/v1/provider/report/<sr_guid>` returning 4xx.
+
+Before diagnosing rejection codes, confirm the provider is hitting **gateway.pdhc**, not request.pdhc. request.pdhc has the same path (now deprecated, aliased from `/provider/status`), but it stores no observations — it will 200 OK and silently drop the data. If the audit_log on request.pdhc shows `report.deprecated_alias_used` for the SR, the provider is on the wrong host.
 
 - **403 contract_not_active**: the contract's `Contract.status` is not `executed`. Edit the contract on contract.pdhc and set status to "Active". Provider can retry; same grant token still works.
 - **410 grant_expired**: the DataExchangeGrant TTL elapsed. Provider must call `GET /provider/feed` to fetch a new one.

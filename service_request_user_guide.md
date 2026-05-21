@@ -75,7 +75,21 @@ Providers respond through their own systems using the receipt token. Their accep
 - **accepted** — provider accepted
 - **rejected** — provider declined
 
-### 7. Archive or Revoke
+### 7. Form Dispatch to 1177
+
+When a ServiceRequest includes clinical forms (Questionnaires from plan.pdhc), pushing to a provider with a 1177 delivery endpoint triggers automatic form dispatch:
+
+1. The FHIR Questionnaire snapshots are injected as **contained resources** in the ServiceRequest
+2. A FHIR Bundle is sent to the 1177 webhook with grant authorization metadata
+3. 1177 creates one patient-facing form assignment per Questionnaire
+4. The patient (or staff) completes the form in the 1177 web UI
+5. On submission, 1177 dispatches the FHIR QuestionnaireResponse back to the gateway using the same grant token
+
+**What you see**: after the patient submits, the ServiceRequest's contract match status updates (e.g. `completed`) and the response payload is recorded.
+
+**No contract match?** Direct 1177 delivery works without a contract match record. The grant token alone authorizes the response return. The match status shows as `direct` in this case.
+
+### 8. Archive or Revoke
 
 - **Archive** — Mark as complete. Use when all data has been received or the service period has ended.
 - **Revoke** — Cancel the request. Only possible if no provider has accepted.

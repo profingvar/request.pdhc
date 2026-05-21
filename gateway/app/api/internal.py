@@ -1,13 +1,18 @@
-"""Internal API — service-to-service endpoints for gateway.pdhc.
+"""Internal API — service-to-service endpoints.
 
 All endpoints require X-Service-Key header authentication.
 Not exposed publicly, not accessible via PAT or SSO.
 """
-from flask import Blueprint, request, jsonify
+import logging
+
+import requests as http_requests
+from flask import Blueprint, current_app, request, jsonify
 
 from app.middleware.auth_middleware import requires_service_key
 
 internal_bp = Blueprint('internal', __name__)
+
+logger = logging.getLogger(__name__)
 
 
 @internal_bp.route('/internal/service-request/<sr_guid>/context', methods=['GET'])
@@ -75,3 +80,86 @@ def validate_grant():
         'grant_type': grant.grant_type,
         'uses_remaining': uses_remaining,
     }), 200
+
+
+@internal_bp.route('/internal/auto-provision-pat', methods=['POST'])
+@requires_service_key
+def auto_provision_pat():
+    """Auto-provision a PAT for a provider org + contract.
+
+    Called by contract.pdhc when a contract is created/updated.
+    Fetches push config from SSO, creates PAT if none exists.
+    """
+    from app.models.security_models import ProviderAccessToken
+    from app.services.pat_service import issue_pat
+
+    body = request.get_json(silent=True) or {}
+    provider_org_guid = body.get('provider_org_guid')
+    contract_guid = body.get('contract_guid')
+
+    if not provider_org_guid or not contract_guid:
+        return jsonify({
+            'error': 'provider_org_guid and contract_guid are required',
+        }), 400
+
+    # Check if a valid PAT already exists for this org+contract
+    existing = ProviderAccessToken.query.filter_by(
+        provider_org_guid=provider_org_guid,
+        contract_guid=contract_guid,
+        revoked=False,
+    ).first()
+
+    if existing and existing.is_valid():
+        return jsonify({
+            'status': 'already_exists',
+            'pat_guid': existing.guid,
+            'delivery_mode': existing.delivery_mode,
+        }), 200
+
+    # Fetch push config from SSO (use internal URL to bypass nginx)
+    sso_base = current_app.config.get('SSO_INTERNAL_URL', current_app.config['SSO_BASE_URL']).rstrip('/')
+    service_key = current_app.config.get('INTERNAL_SERVICE_KEY', '')
+    push_endpoint_url = None
+    push_secret = None
+
+    try:
+        resp = http_requests.get(
+            f"{sso_base}/internal/organisations/{provider_org_guid}/push-config",
+            headers={'X-Service-Key': service_key},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            cfg = resp.json()
+            push_endpoint_url = cfg.get('push_endpoint_url')
+            push_secret = cfg.get('push_secret')
+    except http_requests.RequestException as e:
+        logger.warning("Failed to fetch push config from SSO: %s", e)
+
+    # Determine delivery mode
+    delivery_mode = 'push' if push_endpoint_url else 'poll'
+
+    result, status = issue_pat(
+        provider_org_guid=provider_org_guid,
+        contract_guid=contract_guid,
+        scopes='read',
+        delivery_mode=delivery_mode,
+        push_endpoint_url=push_endpoint_url,
+        push_auth_key=push_secret,
+        created_by_user_guid='system:auto-provision',
+        ip_address=request.remote_addr,
+    )
+
+    if status == 201:
+        logger.info(
+            "Auto-provisioned PAT for org=%s contract=%s mode=%s",
+            provider_org_guid, contract_guid, delivery_mode,
+        )
+        # Don't leak the raw_token in the response — it's internal
+        result.pop('raw_token', None)
+        return jsonify({
+            'status': 'provisioned',
+            'pat_guid': result.get('guid'),
+            'delivery_mode': delivery_mode,
+        }), 201
+
+    return jsonify({'error': 'pat_creation_failed', 'detail': result}), 500

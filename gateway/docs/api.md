@@ -183,12 +183,26 @@ Lists SRs addressed to this provider — **metadata only**, no patient data
 Returns the full FHIR Bundle for one SR. Issues a fresh
 `DataExchangeGrant` if none exists.
 
-### `POST /api/v1/provider/report/<sr_guid>`
+### `POST /api/v1/provider/status/<sr_guid>`
 
-Inbound report submission. Required body fields: `patient_guid`,
+Submit a ServiceRequest **lifecycle status update** (acknowledged /
+in-progress / completed). Required body fields: `patient_guid`,
 `organisation_guid`, `grant_token`, `contract_guid`, plus optional
 `status` (default `completed`) and `report_payload`. Returns 403
 if `organisation_guid` doesn't match the PAT's provider.
+
+**Not for observation data.** Any `report_payload` sent here is
+stored on the contract-match for audit only — it does NOT reach
+`inbound_observations`. For observation data, POST to
+`gateway.pdhc/api/v1/provider/report/<sr_guid>` instead.
+
+### `POST /api/v1/provider/report/<sr_guid>` — *deprecated alias*
+
+Deprecated alias for `/api/v1/provider/status/<sr_guid>` — same
+behaviour, logs a `report.deprecated_alias_used` audit event. Kept
+so existing integrations don't break. New integrations should use
+`/provider/status` here and `/provider/report` on **gateway.pdhc**
+for actual observations.
 
 ### `POST /api/v1/provider/validate-token`
 

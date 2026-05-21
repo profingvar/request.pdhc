@@ -131,8 +131,8 @@
     <tr><td><strong>Intent</strong></td><td>{{ sr.intent }}</td></tr>
     <tr><td><strong>Priority</strong></td><td>{{ sr.priority }}</td></tr>
     <tr><td><strong>Requester</strong></td><td>{{ sr.requester_user_name or '' }}{% if sr.requester_user_name %} {% endif %}<span style="font-size:0.75rem; color:var(--text-muted);">{{ sr.requester_user_guid }}</span></td></tr>
-    <tr><td><strong>Organisation</strong></td><td>{% if sr.requester_org_guid %}{{ sr.requester_org_name or '' }}{% if sr.requester_org_name %} {% endif %}<span style="font-size:0.75rem; color:var(--text-muted);">{{ sr.requester_org_guid }}</span>{% else %}—{% endif %}</td></tr>
-    <tr><td><strong>Contract</strong></td><td>{{ sr.contract_guid or '—' }}</td></tr>
+    <tr><td><strong>Requester Organisation</strong></td><td>{% if sr.requester_org_guid %}{{ sr.requester_org_name or '' }}{% if sr.requester_org_name %} {% endif %}<span style="font-size:0.75rem; color:var(--text-muted);">{{ sr.requester_org_guid }}</span>{% else %}—{% endif %}</td></tr>
+    <tr><td><strong>Contract</strong></td><td>{% if sr.contract_guid %}{{ contract_name or '' }}{% if contract_name %} {% endif %}<span style="font-size:0.75rem; color:var(--text-muted);">{{ sr.contract_guid }}</span>{% else %}—{% endif %}</td></tr>
     <tr><td><strong>Notes</strong></td><td>{{ sr.notes or '—' }}</td></tr>
     <tr><td><strong>Period</strong></td><td>{{ sr.period_start or '—' }} to {{ sr.period_end or '—' }}</td></tr>
     <tr><td><strong>Created</strong></td><td>{{ sr.created_at }}</td></tr>
@@ -147,10 +147,7 @@
   </form>
   {% endif %}
 
-  {% if sr.status == 'active' %}
-  <form method="POST" action="{{ url_for('service_requests_web.find_matches_view', guid=sr.guid) }}" style="display:inline;">
-    <button type="submit" class="btn btn-primary">Find Contract Matches</button>
-  </form>
+  {% if sr.status == 'active' and matches %}
   <form method="POST" action="{{ url_for('service_requests_web.push_all_view', guid=sr.guid) }}" style="display:inline;">
     <button type="submit" class="btn btn-success" onclick="return confirm('Push this ServiceRequest to all pending matched providers?')">Push to Providers</button>
   </form>
@@ -262,7 +259,7 @@
             <td><strong>Patient</strong></td>
             <td>{{ subj.get('display', '') }}</td>
             <td style="font-size:0.75rem;">{{ patient_id }}</td>
-            <td><a href="https://ips.pdhc.se/patients/{{ patient_id }}" target="_blank" class="btn btn-sm btn-secondary" style="padding:0.1rem 0.4rem; font-size:0.75rem;">IPS</a></td>
+            <td><a href="https://ips.pdhc.se/admin/patients/{{ patient_id }}" target="_blank" class="btn btn-sm btn-secondary" style="padding:0.1rem 0.4rem; font-size:0.75rem;">IPS</a></td>
           </tr>
           {# Requester / Practitioner #}
           {% set req = fhir.get('requester', {}) %}
@@ -297,7 +294,7 @@
             <td><strong>PlanDefinition</strong></td>
             <td>{{ (sr.plan_definition_snapshot or {}).get('title', '') }}</td>
             <td style="font-size:0.75rem;">{{ pd_id }}</td>
-            <td><a href="https://plan.pdhc.se/plan-definitions/{{ pd_id }}" target="_blank" class="btn btn-sm btn-secondary" style="padding:0.1rem 0.4rem; font-size:0.75rem;">Plan</a></td>
+            <td><a href="https://plan.pdhc.se/plandefinitions/{{ pd_id }}" target="_blank" class="btn btn-sm btn-secondary" style="padding:0.1rem 0.4rem; font-size:0.75rem;">Plan</a></td>
           </tr>
           {% endif %}
           {# Contract (basedOn) #}
@@ -308,7 +305,7 @@
               <td><strong>Contract</strong></td>
               <td>{{ bo.get('display', '') }}</td>
               <td style="font-size:0.75rem;">{{ c_id }}</td>
-              <td><a href="https://contract.pdhc.se/fhir/Contract/{{ c_id }}" target="_blank" class="btn btn-sm btn-secondary" style="padding:0.1rem 0.4rem; font-size:0.75rem;">Contract</a></td>
+              <td><a href="https://contract.pdhc.se/contracts/{{ c_id }}" target="_blank" class="btn btn-sm btn-secondary" style="padding:0.1rem 0.4rem; font-size:0.75rem;">Contract</a></td>
             </tr>
           {% endfor %}
           {# Performers (matched providers) #}
@@ -389,13 +386,49 @@
 </div>
 {% endif %}
 
+{% if eligible_providers %}
+<div class="card" style="margin-top:1rem;">
+  <h3><i data-lucide="search" style="width:1rem;height:1rem"></i> Eligible Providers</h3>
+  <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:0.5rem;">Providers with contracts covering this PlanDefinition. Select one to dispatch.</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Provider</th>
+        <th>Contract</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ep in eligible_providers %}
+      <tr>
+        <td>{{ ep.provider_name or '' }}{% if ep.provider_name %} {% endif %}<span style="font-size:0.75rem; color:var(--text-muted);">{{ ep.provider_org_guid }}</span></td>
+        <td>{{ ep.contract_title or '' }}{% if ep.contract_title %} {% endif %}<span style="font-size:0.75rem; color:var(--text-muted);">{{ ep.contract_guid }}</span></td>
+        <td>
+          <form method="POST" action="{{ url_for('service_requests_web.dispatch_view', guid=sr.guid) }}" style="display:inline;">
+            <input type="hidden" name="contract_guid" value="{{ ep.contract_guid }}">
+            <input type="hidden" name="provider_org_guid" value="{{ ep.provider_org_guid }}">
+            <input type="hidden" name="provider_name" value="{{ ep.provider_name }}">
+            <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Dispatch to {{ ep.provider_name or ep.provider_org_guid }}?')">Dispatch</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% elif sr.status == 'active' and not matches %}
+<div class="card" style="margin-top:1rem;">
+  <h3><i data-lucide="search" style="width:1rem;height:1rem"></i> Eligible Providers</h3>
+  <p style="color:var(--text-muted);">No contracts found for this PlanDefinition. Create a contract in contract.pdhc first.</p>
+</div>
+{% endif %}
+
 {% if matches %}
 <div class="card" style="margin-top:1rem;">
   <h3>Contract Matches</h3>
   <table>
     <thead>
       <tr>
-        <th>Request</th>
         <th>Provider</th>
         <th>Contract</th>
         <th>Type</th>
@@ -406,9 +439,8 @@
     <tbody>
       {% for m in matches %}
       <tr>
-        <td style="font-size:0.75rem;">{{ m.service_request_guid }}</td>
         <td>{{ m.provider_name or '' }}{% if m.provider_name %} {% endif %}<span style="font-size:0.75rem; color:var(--text-muted);">{{ m.provider_org_guid }}</span></td>
-        <td style="font-size:0.75rem;">{{ m.contract_guid }}</td>
+        <td>{{ contract_names.get(m.contract_guid, '') }}{% if contract_names.get(m.contract_guid) %} {% endif %}<span style="font-size:0.75rem; color:var(--text-muted);">{{ m.contract_guid }}</span></td>
         <td>{{ m.match_type }}</td>
         <td>
           <span class="badge badge-{% if m.status == 'accepted' %}success{% elif m.status == 'rejected' %}danger{% elif m.status == 'sent' %}info{% else %}warning{% endif %}">{{ m.status }}</span>

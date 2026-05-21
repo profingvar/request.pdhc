@@ -259,8 +259,12 @@
       <h3><span class="method method-GET">GET</span> <code>/api/v1/provider/download/&lt;sr_guid&gt;</code></h3>
       <p>Returns the full FHIR Bundle for one SR. Issues a fresh <code>DataExchangeGrant</code> if none exists.</p>
 
-      <h3><span class="method method-POST">POST</span> <code>/api/v1/provider/report/&lt;sr_guid&gt;</code></h3>
-      <p>Inbound report submission. Required body fields: <code>patient_guid</code>, <code>organisation_guid</code>, <code>grant_token</code>, <code>contract_guid</code>, plus optional <code>status</code> (default <code>completed</code>) and <code>report_payload</code>. Returns 403 if <code>organisation_guid</code> doesn't match the PAT's provider.</p>
+      <h3><span class="method method-POST">POST</span> <code>/api/v1/provider/status/&lt;sr_guid&gt;</code></h3>
+      <p>Submit a ServiceRequest <strong>lifecycle status update</strong> (acknowledged / in-progress / completed). Required body fields: <code>patient_guid</code>, <code>organisation_guid</code>, <code>grant_token</code>, <code>contract_guid</code>, plus optional <code>status</code> (default <code>completed</code>) and <code>report_payload</code>. Returns 403 if <code>organisation_guid</code> doesn't match the PAT's provider.</p>
+      <p><strong>Not for observation data.</strong> Any <code>report_payload</code> sent here is stored on the contract-match for audit only — it does <em>not</em> reach <code>inbound_observations</code>. For observation data, POST to <code>gateway.pdhc/api/v1/provider/report/&lt;sr_guid&gt;</code> instead.</p>
+
+      <h3><span class="method method-POST">POST</span> <code>/api/v1/provider/report/&lt;sr_guid&gt;</code> <span class="deprecated">deprecated alias</span></h3>
+      <p>Deprecated alias for <code>/api/v1/provider/status/&lt;sr_guid&gt;</code> — same behaviour, logs a <code>report.deprecated_alias_used</code> audit event. Kept so existing integrations don't break. New integrations should use the <code>/provider/status</code> path on request.pdhc and the <code>/provider/report</code> path on <strong>gateway.pdhc</strong> for actual observations.</p>
 
       <h3><span class="method method-POST">POST</span> <code>/api/v1/provider/validate-token</code></h3>
       <p><span class="auth-mode">public</span> — the token <em>is</em> the credential. Called by gateway.pdhc to resolve a raw PAT into provider identity (org_guid, contract_guid, delivery_mode, push_endpoint_url, push_auth_key).</p>

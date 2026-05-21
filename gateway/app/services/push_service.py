@@ -139,6 +139,7 @@ def push_to_provider(match_guid, user_guid=None, ip_address=None):
             push_headers = _headers()
             if push_auth_key:
                 push_headers['X-API-Key'] = push_auth_key
+                push_headers['X-Push-Secret'] = push_auth_key
 
             resp = http_requests.post(
                 provider_url,

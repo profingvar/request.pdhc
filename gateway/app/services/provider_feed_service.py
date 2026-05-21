@@ -34,7 +34,10 @@ def list_for_provider(provider_org_guid, since=None, limit=50):
     ).filter(
         ServiceRequestContractMatch.provider_org_guid == provider_org_guid,
         ServiceRequestContractMatch.status.in_(['pending', 'sent', 'accepted']),
-        ServiceRequest.status == 'active',
+        # Include 'archived' so providers can still locate a request past
+        # its period_end — late submissions are accepted but will be
+        # flagged by the gateway (ticket #90).
+        ServiceRequest.status.in_(['active', 'archived']),
     )
 
     if since:
@@ -54,12 +57,15 @@ def list_for_provider(provider_org_guid, since=None, limit=50):
             'service_request_guid': sr.guid,
             'match_guid': match.guid,
             'status': match.status,
+            'sr_status': sr.status,
             'title': snapshot.get('title', ''),
             'intent': sr.intent,
             'priority': sr.priority,
             'contract_guid': match.contract_guid,
             'created_at': sr.created_at.isoformat(),
             'updated_at': match.updated_at.isoformat(),
+            'period_start': sr.period_start.isoformat() if sr.period_start else None,
+            'period_end': sr.period_end.isoformat() if sr.period_end else None,
             'download_url': f'/api/v1/provider/download/{sr.guid}',
         })
 
@@ -80,9 +86,12 @@ def download_bundle(service_request_guid, provider_org_guid, contract_guid,
     if not sr:
         return {'code': 'not_found', 'message': 'ServiceRequest not found'}, 404
 
-    if sr.status != 'active':
+    # Archived SRs remain downloadable so providers can still fetch the
+    # bundle and submit late reports (ticket #90). Drafts and revoked
+    # SRs are still blocked — they were never valid for this provider.
+    if sr.status not in ('active', 'archived'):
         return {'code': 'invalid_status',
-                'message': 'ServiceRequest is not active'}, 400
+                'message': f'ServiceRequest status {sr.status} is not downloadable'}, 400
 
     # Verify match exists for this provider
     match = ServiceRequestContractMatch.query.filter_by(
@@ -127,4 +136,7 @@ def download_bundle(service_request_guid, provider_org_guid, contract_guid,
         'patient_guid': sr.patient_guid,
         'contract_guid': contract_guid,
         'provider_org_guid': provider_org_guid,
+        'sr_status': sr.status,
+        'period_start': sr.period_start.isoformat() if sr.period_start else None,
+        'period_end': sr.period_end.isoformat() if sr.period_end else None,
     }, 200

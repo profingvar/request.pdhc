@@ -32,14 +32,14 @@
 
 --- Ticket 8 Results (derived from provider.pdhc/docs/data_package_reference.md, Section 9) ---
 
-8.1 [ ] Internal service key auth — add X-Service-Key support
+8.1 [DONE] Internal service key auth — add X-Service-Key support
    - Add INTERNAL_SERVICE_KEY to config.py
    - Add requires_service_key() decorator in auth_middleware.py
    - Use hmac.compare_digest for constant-time comparison (as done in contract.pdhc)
    - Generic "unauthorized" error on failure (no internal state leakage)
    - Empty key = reject all (safe default)
 
-8.2 [ ] SR context endpoint — GET /api/v1/internal/service-request/<guid>/context
+8.2 [DONE] SR context endpoint — GET /api/v1/internal/service-request/<guid>/context
    - Auth: X-Service-Key (internal only, no rate limit)
    - Returns pre-extracted context gateway.pdhc needs for reconstruction:
      service_request_guid, status, patient_guid, contract_guid,
@@ -50,7 +50,7 @@
      goals[] (description, concept_guid, priority, target_value, target_comparator)
    - New ContextService class to extract this from stored ServiceRequest.fhir_resource
 
-8.3 [ ] Grant validation endpoint — POST /api/v1/internal/grant/validate
+8.3 [DONE] Grant validation endpoint — POST /api/v1/internal/grant/validate
    - Auth: X-Service-Key (internal only)
    - Request body: { sr_guid, org_guid, patient_guid, grant_token }
    - Validates HMAC, expiry, revocation, max_uses (reuses existing grant_service.validate_grant)
@@ -65,13 +65,13 @@
    - Minimal required body: { patient_guid, grant_token, status, observations[] }
    - Backward compatible: if org_guid/contract_guid are provided, cross-check against derived values
 
-8.5 [ ] Internal API blueprint
+8.5 [DONE] Internal API blueprint
    - New file: api/internal.py with blueprint registered at /api/v1/internal
    - Routes: 8.2 (context) + 8.3 (grant validate)
    - All routes behind requires_service_key()
    - Not exposed publicly, not accessible via PAT or SSO
 
-8.6 [ ] Tests
+8.6 [DONE] Tests (11 new, 85/87 total — 2 pre-existing CarePlan failures)
    - Context endpoint: returns correct SR context, handles missing SR, auth rejection
    - Grant validation endpoint: valid grant, expired grant, revoked grant, bad HMAC, auth rejection
    - Simplified report endpoint: minimal payload works, cross-check catches mismatch
