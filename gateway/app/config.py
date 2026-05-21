@@ -16,7 +16,17 @@ class Config:
 
     # When True, all auth checks are bypassed (local dev/debug mode).
     # Defaults to False — must be explicitly enabled.
+    # Ticket #91: refuse to honor AUTH_DISABLED outside FLASK_ENV=development
+    # so a stale dev template can never silently open a prod deployment to
+    # anonymous patient-data reads.
     AUTH_DISABLED = os.environ.get('AUTH_DISABLED', 'false').lower() in ('true', '1', 'yes')
+    if AUTH_DISABLED and FLASK_ENV != 'development':
+        sys.stderr.write(
+            "FATAL: AUTH_DISABLED=true requires FLASK_ENV=development. "
+            "Refusing to start with auth bypassed in a non-dev environment "
+            f"(FLASK_ENV={FLASK_ENV!r}).\n"
+        )
+        sys.exit(1)
 
     # Upstream service URLs
     IPS_BASE_URL = os.environ.get('IPS_BASE_URL', 'https://ips.pdhc.se')
@@ -24,6 +34,7 @@ class Config:
     PLAN_BASE_URL = os.environ.get('PLAN_BASE_URL', 'https://plan.pdhc.se')
     PLAN_API_KEY = os.environ.get('PLAN_API_KEY', '')
     SSO_BASE_URL = os.environ.get('SSO_BASE_URL', 'https://sso.pdhc.se')
+    SSO_INTERNAL_URL = os.environ.get('SSO_INTERNAL_URL', os.environ.get('SSO_BASE_URL', 'https://sso.pdhc.se'))
     SSO_CLIENT_ID = os.environ.get('SSO_CLIENT_ID', '')
     SSO_CLIENT_SECRET = os.environ.get('SSO_CLIENT_SECRET', '')
     SSO_CALLBACK_URL = os.environ.get('SSO_CALLBACK_URL', 'http://localhost:9060/api/v1/auth/callback')
