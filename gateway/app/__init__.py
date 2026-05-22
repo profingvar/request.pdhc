@@ -308,3 +308,81 @@ def _register_provider_cli(app):
             click.echo(f'error: {data}', err=True)
             raise SystemExit(1)
         click.echo(f'revoked: {data["revoked_guids"]}')
+
+    # ── Webhook dispatcher (ticket #140) ─────────────────────────
+
+    @app.cli.group('webhook')
+    def webhook_group():
+        """Outbound webhook dispatcher controls."""
+
+    @webhook_group.command('tick')
+    @click.option('--limit', type=int, default=20)
+    def cmd_webhook_tick(limit):
+        """Process up to <limit> due deliveries and exit."""
+        from app.services.webhook_dispatcher import tick
+        counts = tick(limit=limit)
+        click.echo(
+            f'attempted={counts["attempted"]} '
+            f'succeeded={counts["succeeded"]} '
+            f'rescheduled={counts["rescheduled"]} '
+            f'dead_lettered={counts["dead_lettered"]}'
+        )
+
+    @webhook_group.command('run-worker')
+    @click.option('--interval', type=int, default=5,
+                  help='Seconds between ticks (default 5).')
+    @click.option('--limit', type=int, default=20,
+                  help='Max deliveries per tick.')
+    def cmd_webhook_worker(interval, limit):
+        """Run the dispatcher loop until interrupted.
+
+        Intended for start.sh invocation:
+            flask webhook run-worker &
+        """
+        import time
+        from app.services.webhook_dispatcher import tick
+        click.echo(f'webhook worker starting; interval={interval}s')
+        while True:
+            try:
+                counts = tick(limit=limit)
+                if counts['attempted']:
+                    click.echo(
+                        f'tick: attempted={counts["attempted"]} '
+                        f'succeeded={counts["succeeded"]} '
+                        f'rescheduled={counts["rescheduled"]} '
+                        f'dead_lettered={counts["dead_lettered"]}'
+                    )
+            except Exception as e:
+                click.echo(f'tick error: {e}', err=True)
+            time.sleep(interval)
+
+    @webhook_group.command('list-pending')
+    def cmd_webhook_list_pending():
+        """Show pending + dead-lettered deliveries (for debugging)."""
+        from app.models.security_models import WebhookDelivery
+        rows = WebhookDelivery.query.filter(
+            WebhookDelivery.status.in_(['pending', 'dead_letter'])
+        ).order_by(WebhookDelivery.created_at.desc()).limit(50).all()
+        for r in rows:
+            click.echo(
+                f'{r.guid}  {r.status}  attempts={r.attempt_count}  '
+                f'{r.event_type}  org={r.provider_org_guid}  '
+                f'next={r.next_attempt_at}'
+            )
+
+    @webhook_group.command('requeue')
+    @click.option('--guid', required=True, help='WebhookDelivery guid')
+    def cmd_webhook_requeue(guid):
+        """Move a dead-lettered delivery back to pending with a fresh attempt window."""
+        from datetime import datetime, timezone
+        from app.models.security_models import WebhookDelivery
+        row = WebhookDelivery.query.filter_by(guid=guid).first()
+        if not row:
+            click.echo('not found', err=True)
+            raise SystemExit(1)
+        row.status = WebhookDelivery.STATUS_PENDING
+        row.attempt_count = 0
+        row.next_attempt_at = datetime.now(timezone.utc)
+        row.last_error = None
+        db.session.commit()
+        click.echo(f'requeued: {row.guid}')

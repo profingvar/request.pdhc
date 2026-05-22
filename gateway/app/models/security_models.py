@@ -203,3 +203,73 @@ class WebhookSigningSecret(db.Model):
             'rotated_to_guid': self.rotated_to_guid,
             'created_by_user_guid': self.created_by_user_guid,
         }
+
+
+class WebhookDelivery(db.Model):
+    """One scheduled outbound webhook (ticket #140).
+
+    Lifecycle: pending → in_flight → (succeeded | dead_letter).
+    On non-2xx or transport error, attempt_count increments and
+    next_attempt_at is set per the dispatcher's backoff schedule.
+    After WEBHOOK_MAX_ATTEMPTS the row becomes dead_letter and an
+    ops ticket is filed.
+
+    Payload is metadata only — never PHI. The body the provider
+    receives is `payload` exactly; `signature` is the HMAC-SHA256 hex
+    digest the provider verifies against the active webhook signing
+    secret (model: WebhookSigningSecret).
+    """
+    __tablename__ = 'webhook_deliveries'
+
+    STATUS_PENDING = 'pending'
+    STATUS_IN_FLIGHT = 'in_flight'
+    STATUS_SUCCEEDED = 'succeeded'
+    STATUS_DEAD_LETTER = 'dead_letter'
+
+    id = db.Column(db.Integer, primary_key=True)
+    guid = db.Column(db.String(36), unique=True, nullable=False,
+                     default=lambda: str(uuid.uuid4()))
+    event_id = db.Column(db.String(36), unique=True, nullable=False,
+                         default=lambda: str(uuid.uuid4()))
+    event_type = db.Column(db.String(64), nullable=False)
+    provider_org_guid = db.Column(db.String(36), nullable=False, index=True)
+    service_request_guid = db.Column(db.String(36), nullable=True, index=True)
+    webhook_url = db.Column(db.String(1024), nullable=False)
+    payload_json = db.Column(db.Text, nullable=False)
+    signature = db.Column(db.String(128), nullable=True)
+    signing_secret_guid = db.Column(db.String(36), nullable=True)
+    attempt_count = db.Column(db.Integer, nullable=False, default=0)
+    next_attempt_at = db.Column(db.DateTime, nullable=False,
+                                default=lambda: datetime.now(timezone.utc),
+                                index=True)
+    status = db.Column(db.String(20), nullable=False,
+                       default='pending', index=True)
+    last_response_code = db.Column(db.Integer, nullable=True)
+    last_response_body_excerpt = db.Column(db.String(1024), nullable=True)
+    last_error = db.Column(db.String(512), nullable=True)
+    last_attempt_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False,
+                           default=lambda: datetime.now(timezone.utc))
+    succeeded_at = db.Column(db.DateTime, nullable=True)
+
+    def to_dict(self):
+        return {
+            'guid': self.guid,
+            'event_id': self.event_id,
+            'event_type': self.event_type,
+            'provider_org_guid': self.provider_org_guid,
+            'service_request_guid': self.service_request_guid,
+            'webhook_url': self.webhook_url,
+            'attempt_count': self.attempt_count,
+            'next_attempt_at': self.next_attempt_at.isoformat()
+                if self.next_attempt_at else None,
+            'status': self.status,
+            'last_response_code': self.last_response_code,
+            'last_response_body_excerpt': self.last_response_body_excerpt,
+            'last_error': self.last_error,
+            'last_attempt_at': self.last_attempt_at.isoformat()
+                if self.last_attempt_at else None,
+            'created_at': self.created_at.isoformat(),
+            'succeeded_at': self.succeeded_at.isoformat()
+                if self.succeeded_at else None,
+        }
