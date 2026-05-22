@@ -386,3 +386,157 @@ def _register_provider_cli(app):
         row.last_error = None
         db.session.commit()
         click.echo(f'requeued: {row.guid}')
+
+    # ── Sandbox dispatch + signature helpers (ticket #141) ───────
+
+    @provider_group.command('sandbox-dispatch')
+    @click.option('--org-guid', required=True)
+    @click.option('--contract-guid', required=True)
+    @click.option('--concept-guid', 'concept_guids', multiple=True,
+                  help='Repeatable. Sample concept GUIDs to embed in the SR.')
+    @click.option('--webhook-url', default=None,
+                  help='Override the PAT-configured webhook URL.')
+    @click.option('--patient-guid', default='SANDBOX-PATIENT',
+                  help='Synthetic patient guid. Defaults to SANDBOX-PATIENT.')
+    @click.option('--immediate/--no-immediate', default=True,
+                  help='Run tick() in-process after enqueuing.')
+    def cmd_sandbox_dispatch(org_guid, contract_guid, concept_guids,
+                             webhook_url, patient_guid, immediate):
+        """End-to-end go-live rehearsal (ticket #141).
+
+        Synthesises a service_request.dispatched event, signs it,
+        sends it to the provider's webhook URL, then re-sends with the
+        same X-PDHC-Event-Id to verify provider-side idempotency.
+        Reports PASS/FAIL.
+        """
+        import json
+        import uuid
+        from app.models.security_models import (
+            ProviderAccessToken, WebhookDelivery,
+        )
+        from app.services import webhook_dispatcher
+
+        # Resolve webhook URL from the active PAT if not overridden
+        if not webhook_url:
+            pat = ProviderAccessToken.query.filter_by(
+                provider_org_guid=org_guid, contract_guid=contract_guid,
+                status='active',
+            ).first()
+            if not pat or not pat.push_endpoint_url:
+                click.echo('error: no active PAT with push_endpoint_url; '
+                           'pass --webhook-url to override.', err=True)
+                raise SystemExit(2)
+            webhook_url = pat.push_endpoint_url
+
+        sr_guid = f'sandbox-{uuid.uuid4()}'
+        payload = {
+            'event': 'service_request.dispatched',
+            'event_version': '1.0',
+            'service_request_guid': sr_guid,
+            'contract_guid': contract_guid,
+            'patient_guid': patient_guid,
+            'concept_guids': list(concept_guids),
+            'priority': 'routine',
+            'sandbox': True,
+            'download_url': f'/api/v1/provider/download/{sr_guid}',
+        }
+
+        # 1st delivery
+        click.echo(f'sandbox-dispatch  org={org_guid}  contract={contract_guid}')
+        click.echo(f'  sr_guid={sr_guid}  url={webhook_url}')
+        first = webhook_dispatcher.enqueue(
+            event_type='service_request.dispatched',
+            provider_org_guid=org_guid,
+            service_request_guid=sr_guid,
+            webhook_url=webhook_url,
+            payload=payload,
+        )
+        if immediate:
+            webhook_dispatcher.tick(limit=1)
+
+        first = WebhookDelivery.query.filter_by(guid=first.guid).first()
+        click.echo(f'  delivery #1: status={first.status} '
+                   f'code={first.last_response_code} '
+                   f'event_id={first.event_id}')
+
+        if first.status != WebhookDelivery.STATUS_SUCCEEDED:
+            click.echo(f'FAIL on first delivery: {first.last_error or first.last_response_body_excerpt}',
+                       err=True)
+            raise SystemExit(1)
+
+        # 2nd delivery — replay with the SAME X-PDHC-Event-Id. The
+        # WebhookDelivery row has a uniqueness constraint on event_id,
+        # so we bypass the queue and POST directly. The provider's
+        # job is to de-dup; our job is to verify their de-dup works.
+        import time as _time
+        body_str = json.dumps(payload, separators=(',', ':'), sort_keys=True)
+        body_bytes = body_str.encode('utf-8')
+        secret = webhook_dispatcher.get_signing_secret(org_guid)
+        signature = (
+            webhook_dispatcher.compute_signature(secret, body_bytes)
+            if secret else None
+        )
+        replay_headers = {
+            'Content-Type': 'application/json',
+            'X-PDHC-Event-Id': first.event_id,
+            'X-PDHC-Event-Type': 'service_request.dispatched',
+            'X-PDHC-Timestamp': str(int(_time.time())),
+        }
+        if signature:
+            replay_headers['X-PDHC-Signature'] = signature
+
+        try:
+            resp = webhook_dispatcher.http_requests.post(
+                webhook_url, data=body_bytes, headers=replay_headers,
+                timeout=webhook_dispatcher.REQUEST_TIMEOUT,
+            )
+            replay_code = resp.status_code
+            replay_ok = 200 <= replay_code < 300
+            replay_excerpt = (resp.text or '')[:200]
+        except webhook_dispatcher.http_requests.RequestException as e:
+            replay_ok = False
+            replay_code = None
+            replay_excerpt = str(e)
+
+        click.echo(f'  delivery #2 (replay): code={replay_code} '
+                   f'event_id={first.event_id}  ok={replay_ok}')
+
+        if not replay_ok:
+            click.echo(
+                f'FAIL on idempotent replay: provider did not return 2xx — {replay_excerpt}',
+                err=True,
+            )
+            raise SystemExit(1)
+
+        click.echo(f'PASS  delivery_guid_1={first.guid}')
+
+    @provider_group.command('sandbox-sign')
+    @click.option('--org-guid', required=True)
+    @click.option('--payload-file', required=True,
+                  type=click.Path(exists=True, dir_okay=False))
+    def cmd_sandbox_sign(org_guid, payload_file):
+        """Print the headers + body the dispatcher would send for a
+        given payload file. Lets a provider engineer verify their
+        local HMAC implementation against PDHC's signature.
+        """
+        import time
+        import uuid
+        from app.services import webhook_dispatcher
+        from app.services.webhook_secret_service import get_signing_secret
+
+        with open(payload_file, 'rb') as fh:
+            body = fh.read()
+
+        secret = get_signing_secret(org_guid)
+        if not secret:
+            click.echo(f'error: no active signing secret for org {org_guid}',
+                       err=True)
+            raise SystemExit(2)
+
+        sig = webhook_dispatcher.compute_signature(secret, body)
+        click.echo(f'X-PDHC-Event-Id: {uuid.uuid4()}')
+        click.echo(f'X-PDHC-Event-Type: service_request.dispatched')
+        click.echo(f'X-PDHC-Timestamp: {int(time.time())}')
+        click.echo(f'X-PDHC-Signature: {sig}')
+        click.echo('')
+        click.echo(body.decode('utf-8', errors='replace'))
