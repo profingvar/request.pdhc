@@ -100,41 +100,63 @@ def issue_grant(service_request_guid, patient_guid, provider_org_guid,
     return result, 201
 
 
-def validate_grant(service_request_guid, patient_guid, provider_org_guid,
-                   contract_guid, grant_token):
-    """Validate a composite key (4 GUIDs + grant_token).
+def validate_grant_detailed(service_request_guid, patient_guid, provider_org_guid,
+                            contract_guid, grant_token):
+    """Validate a composite key (4 GUIDs + grant_token) with reason detail.
+
+    Per the provider integration guide (Phase G #4-5), callers need to
+    distinguish "expired" from other invalid-grant cases so the response
+    code can be GRANT_EXPIRED vs GRANT_TOKEN_INVALID.
 
     Returns:
-        DataExchangeGrant or None
+        tuple(grant_or_None, reason_str). reason ∈ {
+          'valid', 'not_found', 'revoked', 'expired',
+          'patient_mismatch', 'invalid_token',
+        }
     """
-    # contract_guid is optional — gateway's GrantValidationService doesn't
-    # pass it (it derives contract_guid from the validated grant response).
-    # When the caller does provide it, use it as an extra filter; otherwise
-    # rely on patient+org+sr+grant_token uniqueness and cross-check below.
     filters = dict(
         service_request_guid=service_request_guid,
         provider_org_guid=provider_org_guid,
-        revoked=False,
     )
     if contract_guid:
         filters['contract_guid'] = contract_guid
 
     grant = DataExchangeGrant.query.filter_by(**filters).first()
-
     if not grant:
-        return None
+        return None, 'not_found'
+
+    if grant.revoked:
+        return None, 'revoked'
+
+    # Expiry check, split out so callers can map to GRANT_EXPIRED specifically
+    if grant.expires_at:
+        exp = grant.expires_at if grant.expires_at.tzinfo else grant.expires_at.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) > exp:
+            return None, 'expired'
 
     if not grant.is_valid():
-        return None
+        return None, 'invalid_token'
 
-    # Verify the patient_guid matches
     if grant.patient_guid != patient_guid:
-        return None
+        return None, 'patient_mismatch'
 
-    # Verify the HMAC token
     if not hmac.compare_digest(grant.grant_token, grant_token):
-        return None
+        return None, 'invalid_token'
 
+    return grant, 'valid'
+
+
+def validate_grant(service_request_guid, patient_guid, provider_org_guid,
+                   contract_guid, grant_token):
+    """Backward-compatible wrapper around validate_grant_detailed().
+
+    Returns:
+        DataExchangeGrant or None
+    """
+    grant, _reason = validate_grant_detailed(
+        service_request_guid, patient_guid, provider_org_guid,
+        contract_guid, grant_token,
+    )
     return grant
 
 

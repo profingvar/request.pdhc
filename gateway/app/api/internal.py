@@ -40,7 +40,7 @@ def validate_grant():
     Gateway calls this instead of validating HMAC locally,
     so the HMAC_SECRET never leaves request.pdhc.
     """
-    from app.services.grant_service import validate_grant as _validate
+    from app.services.grant_service import validate_grant_detailed as _validate_detailed
 
     body = request.get_json(silent=True) or {}
 
@@ -52,7 +52,7 @@ def validate_grant():
             'error': f'Missing required fields: {", ".join(missing)}',
         }), 400
 
-    grant = _validate(
+    grant, reason = _validate_detailed(
         service_request_guid=body['sr_guid'],
         patient_guid=body['patient_guid'],
         provider_org_guid=body['org_guid'],
@@ -61,9 +61,22 @@ def validate_grant():
     )
 
     if not grant:
+        # Per provider integration guide Phase G #4-5: expired tokens
+        # must be distinguishable from other invalid-grant cases so the
+        # client can map them to GRANT_EXPIRED vs GRANT_TOKEN_INVALID.
+        error_code = 'GRANT_EXPIRED' if reason == 'expired' else 'GRANT_TOKEN_INVALID'
+        error_msg = {
+            'expired': 'Grant token has expired',
+            'revoked': 'Grant token has been revoked',
+            'not_found': 'Grant not found',
+            'patient_mismatch': 'Patient GUID does not match grant',
+            'invalid_token': 'Invalid grant token',
+        }.get(reason, 'Grant invalid, expired, or revoked')
         return jsonify({
             'valid': False,
-            'error': 'Grant invalid, expired, or revoked',
+            'error': error_msg,
+            'error_code': error_code,
+            'reason': reason,
         }), 200
 
     # Record usage
