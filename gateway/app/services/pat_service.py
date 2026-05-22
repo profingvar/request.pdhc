@@ -65,20 +65,33 @@ def issue_pat(provider_org_guid, contract_guid, scopes='read',
 def validate_pat(raw_token):
     """Validate a raw token against stored PATs.
 
+    Considers active and grace-period 'deprecated' PATs valid; rejects
+    revoked or fully-expired ones. is_valid() applies the three-state
+    semantics (ticket #136).
+
     Returns:
         ProviderAccessToken or None
     """
-    pats = ProviderAccessToken.query.filter_by(revoked=False).all()
+    # Filter out hard-revoked rows up front so we don't bcrypt-compare
+    # against tokens that can never authenticate. Both the legacy
+    # `revoked` boolean and the new `status` column are checked.
+    pats = ProviderAccessToken.query.filter(
+        ProviderAccessToken.revoked.is_(False),
+        ProviderAccessToken.status != 'revoked',
+    ).all()
     for pat in pats:
         if pat.verify_token(raw_token):
             if pat.is_valid():
                 return pat
-            return None  # found but expired/revoked
+            return None  # found but expired/grace-expired/revoked
     return None
 
 
 def revoke_pat(pat_guid, user_guid=None, ip_address=None):
     """Revoke a Provider Access Token.
+
+    Sets both the legacy `revoked` bool and `status='revoked'` so old
+    and new consumers reject it.
 
     Returns:
         tuple: (result_dict, status_code)
@@ -87,11 +100,12 @@ def revoke_pat(pat_guid, user_guid=None, ip_address=None):
     if not pat:
         return {'code': 'not_found', 'message': 'PAT not found'}, 404
 
-    if pat.revoked:
+    if pat.revoked or pat.status == 'revoked':
         return {'code': 'already_revoked', 'message': 'PAT already revoked'}, 400
 
     pat.revoked = True
     pat.revoked_at = datetime.now(timezone.utc)
+    pat.status = 'revoked'
     db.session.commit()
 
     log_event(
@@ -104,6 +118,67 @@ def revoke_pat(pat_guid, user_guid=None, ip_address=None):
     )
 
     return pat.to_dict(), 200
+
+
+def rotate_pat(provider_org_guid, contract_guid, *,
+               created_by_user_guid=None, ip_address=None,
+               expires_days=None):
+    """Issue a new active PAT; mark any existing active/deprecated
+    PATs for the same org+contract as 'deprecated' so the provider
+    has a grace window (PAT_DEPRECATED_GRACE_DAYS) to swap tokens.
+
+    Returns (result_with_raw_token, status_code).
+    """
+    # Find the current active PAT (most recent if multiple).
+    current = (ProviderAccessToken.query
+               .filter_by(provider_org_guid=provider_org_guid,
+                          contract_guid=contract_guid,
+                          status='active')
+               .order_by(ProviderAccessToken.created_at.desc())
+               .first())
+
+    # Carry forward delivery_mode + push config so the rotation doesn't
+    # silently switch a push-mode provider to poll.
+    delivery_mode = current.delivery_mode if current else 'poll'
+    push_endpoint_url = current.push_endpoint_url if current else None
+    push_auth_key = current.push_auth_key_encrypted if current else None
+    scopes = current.scopes if current else 'read'
+
+    result, status = issue_pat(
+        provider_org_guid=provider_org_guid,
+        contract_guid=contract_guid,
+        scopes=scopes,
+        delivery_mode=delivery_mode,
+        push_endpoint_url=push_endpoint_url,
+        push_auth_key=push_auth_key,
+        expires_days=expires_days,
+        created_by_user_guid=created_by_user_guid,
+        ip_address=ip_address,
+    )
+    if status != 201:
+        return result, status
+
+    if current:
+        now = datetime.now(timezone.utc)
+        current.status = 'deprecated'
+        current.deprecated_at = now
+        current.rotated_to_guid = result['guid']
+        db.session.commit()
+
+        log_event(
+            user_guid=created_by_user_guid,
+            action='pat.rotated',
+            resource_type='ProviderAccessToken',
+            resource_guid=result['guid'],
+            details={
+                'provider_org_guid': provider_org_guid,
+                'contract_guid': contract_guid,
+                'previous_guid': current.guid,
+            },
+            ip_address=ip_address,
+        )
+
+    return result, 201
 
 
 def list_pats(provider_org_guid=None, include_revoked=False):

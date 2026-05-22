@@ -176,7 +176,9 @@ def create_app(testing=False):
             return jsonify({'code': 'internal_error', 'message': 'Internal server error'}), 500
         return e
 
-    # CLI commands
+    # CLI commands — provider lifecycle (ticket #136)
+    _register_provider_cli(app)
+
     @app.cli.command('seed-1177-pat')
     def seed_1177_pat():
         """Issue a push PAT for 1177.pdhc.se webhook delivery."""
@@ -197,3 +199,112 @@ def create_app(testing=False):
             print(f'Error: {data}')
 
     return app
+
+
+def _register_provider_cli(app):
+    """flask provider … subcommands (ticket #136)."""
+    import click
+
+    @app.cli.group('provider')
+    def provider_group():
+        """Provider lifecycle: PATs and webhook signing secrets."""
+
+    @provider_group.command('register-pat')
+    @click.option('--org-guid', required=True)
+    @click.option('--contract-guid', required=True)
+    @click.option('--scopes', default='read,write')
+    @click.option('--delivery-mode', type=click.Choice(['push', 'poll']),
+                  default='poll')
+    @click.option('--push-endpoint-url', default=None)
+    @click.option('--expires-days', type=int, default=None)
+    def cmd_register_pat(org_guid, contract_guid, scopes, delivery_mode,
+                         push_endpoint_url, expires_days):
+        """Issue a new PAT for a provider org+contract. Prints raw token once."""
+        from app.services.pat_service import issue_pat
+        data, status = issue_pat(
+            provider_org_guid=org_guid,
+            contract_guid=contract_guid,
+            scopes=scopes,
+            delivery_mode=delivery_mode,
+            push_endpoint_url=push_endpoint_url,
+            expires_days=expires_days,
+            created_by_user_guid='cli',
+        )
+        if status != 201:
+            click.echo(f'error: {data}', err=True)
+            raise SystemExit(1)
+        click.echo(f'pat_guid: {data["guid"]}')
+        click.echo(f'raw_token (save this — shown only once): {data["raw_token"]}')
+
+    @provider_group.command('rotate-pat')
+    @click.option('--org-guid', required=True)
+    @click.option('--contract-guid', required=True)
+    @click.option('--expires-days', type=int, default=None)
+    def cmd_rotate_pat(org_guid, contract_guid, expires_days):
+        """Rotate a PAT: issue new active, mark old as deprecated (14d grace)."""
+        from app.services.pat_service import rotate_pat
+        data, status = rotate_pat(
+            provider_org_guid=org_guid,
+            contract_guid=contract_guid,
+            expires_days=expires_days,
+            created_by_user_guid='cli',
+        )
+        if status != 201:
+            click.echo(f'error: {data}', err=True)
+            raise SystemExit(1)
+        click.echo(f'new_pat_guid: {data["guid"]}')
+        click.echo(f'raw_token (save this — shown only once): {data["raw_token"]}')
+
+    @provider_group.command('revoke-pat')
+    @click.option('--pat-guid', required=True)
+    def cmd_revoke_pat(pat_guid):
+        """Revoke a PAT by its guid. Takes effect immediately."""
+        from app.services.pat_service import revoke_pat
+        data, status = revoke_pat(pat_guid, user_guid='cli')
+        if status != 200:
+            click.echo(f'error: {data}', err=True)
+            raise SystemExit(1)
+        click.echo(f'revoked: {data["guid"]}')
+
+    @provider_group.command('register-signing-secret')
+    @click.option('--org-guid', required=True)
+    def cmd_register_secret(org_guid):
+        """Issue a webhook signing secret for an org. Prints plaintext once."""
+        from app.services.webhook_secret_service import register_secret
+        data, status = register_secret(
+            provider_org_guid=org_guid, created_by_user_guid='cli',
+        )
+        if status != 201:
+            click.echo(f'error: {data}', err=True)
+            raise SystemExit(1)
+        click.echo(f'secret_guid: {data["guid"]}')
+        click.echo(f'secret_plaintext (save this — shown only once): '
+                   f'{data["secret_plaintext"]}')
+
+    @provider_group.command('rotate-signing-secret')
+    @click.option('--org-guid', required=True)
+    def cmd_rotate_secret(org_guid):
+        """Rotate a webhook signing secret. 14d verification grace for the previous one."""
+        from app.services.webhook_secret_service import rotate_secret
+        data, status = rotate_secret(
+            provider_org_guid=org_guid, created_by_user_guid='cli',
+        )
+        if status != 201:
+            click.echo(f'error: {data}', err=True)
+            raise SystemExit(1)
+        click.echo(f'new_secret_guid: {data["guid"]}')
+        click.echo(f'secret_plaintext (save this — shown only once): '
+                   f'{data["secret_plaintext"]}')
+
+    @provider_group.command('revoke-signing-secret')
+    @click.option('--org-guid', required=True)
+    def cmd_revoke_secret(org_guid):
+        """Revoke every webhook signing secret (active + deprecated) for an org."""
+        from app.services.webhook_secret_service import revoke_secret
+        data, status = revoke_secret(
+            provider_org_guid=org_guid, user_guid='cli',
+        )
+        if status != 200:
+            click.echo(f'error: {data}', err=True)
+            raise SystemExit(1)
+        click.echo(f'revoked: {data["revoked_guids"]}')
