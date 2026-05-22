@@ -6,6 +6,7 @@ from app.models.service_request_models import ServiceRequest, ServiceRequestCont
 from app.services import patient_service, plan_definition_service, form_service
 from app.services.fhir_builder_service import build_service_request_resource, build_patient_excerpt
 from app.services.audit_service import log_event
+from app.services import scope_service
 
 
 def create_service_request(patient_guid, plan_definition_guid, user_guid, org_guid=None,
@@ -25,6 +26,55 @@ def create_service_request(patient_guid, plan_definition_guid, user_guid, org_gu
     plandef_data, plandef_status = plan_definition_service.get_plan_definition(plan_definition_guid)
     if plandef_status != 200:
         return {'code': 'plandef_error', 'message': f'Could not fetch PlanDefinition: {plandef_data}'}, plandef_status
+
+    # Contract scope check (ticket #135 / provider integration guide Phase G).
+    # If contract_guid is set, refuse to author the SR when any concept in
+    # the plan falls outside the contract's request_scope, or when the
+    # contract is revoked/terminated/cancelled.
+    if contract_guid:
+        verdict, payload = scope_service.validate_snapshot_against_scope(
+            plandef_data, contract_guid,
+        )
+        if verdict == 'contract_inactive':
+            log_event(
+                user_guid=user_guid,
+                action='service_request.create.rejected',
+                resource_type='Contract',
+                resource_guid=contract_guid,
+                details={
+                    'reason': 'CONTRACT_INACTIVE',
+                    'contract_status': payload.get('status'),
+                    'patient_guid': patient_guid,
+                    'plan_definition_guid': plan_definition_guid,
+                },
+                ip_address=ip_address,
+            )
+            return {
+                'code': 'CONTRACT_INACTIVE',
+                'message': f'Contract is {payload.get("status", "inactive")}',
+            }, 403
+        if verdict == 'out_of_scope':
+            log_event(
+                user_guid=user_guid,
+                action='service_request.create.rejected',
+                resource_type='Contract',
+                resource_guid=contract_guid,
+                details={
+                    'reason': 'SCOPE_VIOLATION',
+                    'out_of_scope_concept_guids':
+                        payload.get('out_of_scope_concept_guids'),
+                    'patient_guid': patient_guid,
+                    'plan_definition_guid': plan_definition_guid,
+                },
+                ip_address=ip_address,
+            )
+            return {
+                'code': 'SCOPE_VIOLATION',
+                'message': "PlanDefinition references concepts outside the "
+                           "contract's request_scope",
+                'out_of_scope_concept_guids':
+                    payload.get('out_of_scope_concept_guids'),
+            }, 403
 
     patient_excerpt = build_patient_excerpt(patient_data)
 
