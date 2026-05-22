@@ -157,11 +157,23 @@ flask webhook requeue --guid <guid>       Move a DLQ row back to pending.
 - transport error counted as failure
 - signature is over the exact body the provider receives
 
-## Open follow-ups
+## Wiring (#152 — landed)
 
-- Wire `enqueue_service_request_dispatched` into
-  `service_request_service.create_service_request` after the SR commit.
-  This requires looking up the provider org's webhook URL — for now
-  that lives in `ProviderAccessToken.push_endpoint_url`. (Filed: see
-  the operator runbook in #142 for the manual go-live flow until the
-  trigger is wired.)
+`service_request_service.create_service_request` calls
+`_enqueue_dispatch_webhooks(sr, contract_guid)` after the SR commits.
+That helper looks up every `ProviderAccessToken` for the contract
+with `status='active'` AND `delivery_mode='push'` AND a non-empty
+`push_endpoint_url`, and calls
+`enqueue_service_request_dispatched(sr, org_guid, url)` for each.
+
+The fan-out is best-effort: a single bad provider's enqueue raises
+through `try/except` and is logged, never rolling back the SR
+commit. A provider with no active signing secret still gets a
+delivery row but in `dead_letter` status, which auto-files an ops
+ticket per the dispatcher's DLQ rules.
+
+`docker-compose.yml` includes a `worker` service alongside `app` and
+`db`. It uses the same image, overrides the entrypoint to
+`flask webhook run-worker --interval 5`, depends on `app:
+service_healthy` so migrations are done before the worker boots, and
+has `restart: unless-stopped` so it survives crashes.

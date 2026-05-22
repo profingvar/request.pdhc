@@ -40,6 +40,31 @@ services:
       retries: 3
       start_period: 30s
 
+  # Webhook dispatcher worker (tickets #140, #152). Runs flask
+  # webhook run-worker in a loop, processing pending WebhookDelivery
+  # rows with backoff and DLQ ticket emission. Restarts on crash;
+  # uses the same image + env as the app container.
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: request_pdhc_worker
+    depends_on:
+      db:
+        condition: service_healthy
+      app:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-request_admin}:${POSTGRES_PASSWORD:-request_dev_2026!}@db:5432/${POSTGRES_DB:-request_pdhc}
+      FLASK_APP: wsgi:application
+    # Override entrypoint.sh — the worker doesn't need to run
+    # migrations (the app container does), and shouldn't bind any
+    # port. Just sit and tick.
+    entrypoint: ["flask", "webhook", "run-worker", "--interval", "5"]
+    restart: unless-stopped
+
 volumes:
   request_pdhc_pgdata:
     name: request_pdhc_pgdata

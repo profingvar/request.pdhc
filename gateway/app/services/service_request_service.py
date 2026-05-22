@@ -1,12 +1,16 @@
 """Core ServiceRequest CRUD and workflow orchestration."""
 
+import logging
 from datetime import datetime, timezone
 from app import db
+from app.models.security_models import ProviderAccessToken
 from app.models.service_request_models import ServiceRequest, ServiceRequestContractMatch, ServiceRequestForm
 from app.services import patient_service, plan_definition_service, form_service
 from app.services.fhir_builder_service import build_service_request_resource, build_patient_excerpt
 from app.services.audit_service import log_event
 from app.services import scope_service
+
+logger = logging.getLogger(__name__)
 
 
 def create_service_request(patient_guid, plan_definition_guid, user_guid, org_guid=None,
@@ -103,7 +107,56 @@ def create_service_request(patient_guid, plan_definition_guid, user_guid, org_gu
         ip_address=ip_address,
     )
 
+    # Ticket #152: now that the SR exists, enqueue an outbound
+    # service_request.dispatched webhook for every provider org that
+    # has an active push-mode PAT on this contract. Best-effort —
+    # failures here must NOT roll back the SR commit, only get logged.
+    if contract_guid:
+        _enqueue_dispatch_webhooks(sr, contract_guid)
+
     return sr.to_dict(), 201
+
+
+def _enqueue_dispatch_webhooks(sr, contract_guid):
+    """For each active push-mode PAT on this contract, enqueue a
+    service_request.dispatched webhook (ticket #152).
+
+    Looks up ProviderAccessToken rows directly — one PAT per
+    provider_org_guid + contract pair. delivery_mode='push' with a
+    non-empty push_endpoint_url is the precondition for getting a
+    webhook; poll-mode providers will see the SR via /provider/feed
+    instead.
+    """
+    try:
+        from app.services.webhook_dispatcher import (
+            enqueue_service_request_dispatched,
+        )
+        pats = ProviderAccessToken.query.filter_by(
+            contract_guid=contract_guid,
+            delivery_mode='push',
+            status='active',
+        ).all()
+        for pat in pats:
+            url = pat.push_endpoint_url
+            if not url:
+                continue
+            try:
+                enqueue_service_request_dispatched(
+                    sr, pat.provider_org_guid, url,
+                )
+            except Exception as e:
+                # One bad provider must not break the whole fan-out
+                logger.exception(
+                    'dispatcher enqueue failed for sr=%s org=%s: %s',
+                    sr.guid, pat.provider_org_guid, e,
+                )
+    except Exception as e:
+        # Defensive — service-request creation is the load-bearing
+        # transaction; webhook enqueue is opportunistic.
+        logger.exception(
+            'webhook enqueue fan-out failed for sr=%s contract=%s: %s',
+            sr.guid, contract_guid, e,
+        )
 
 
 def get_service_request(guid):
