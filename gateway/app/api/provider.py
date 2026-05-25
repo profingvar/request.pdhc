@@ -7,6 +7,7 @@ from flask import Blueprint, request, jsonify, g
 
 from app.middleware.auth_middleware import requires_provider_token
 from app.services.audit_service import log_event
+from app.services.secret_crypto import decrypt as decrypt_secret
 
 provider_bp = Blueprint('provider', __name__)
 
@@ -193,7 +194,7 @@ def validate_token():
         # its receipt ingestion endpoint (same value used for X-Push-Secret
         # on inbound bundles).
         'push_endpoint_url': pat.push_endpoint_url,
-        'push_auth_key': pat.push_auth_key_encrypted,
+        'push_auth_key': decrypt_secret(pat.push_auth_key_encrypted),  # #151: decrypt for the gateway
     }), 200
 
 

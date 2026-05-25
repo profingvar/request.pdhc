@@ -37,29 +37,11 @@ logger = logging.getLogger(__name__)
 SECRET_BYTES = 48  # 384 bits — comfortable margin for HMAC-SHA256
 
 
-def _fernet():
-    """Return a Fernet instance keyed from WEBHOOK_SECRETS_KEY env."""
-    key = os.environ.get('WEBHOOK_SECRETS_KEY', '')
-    if not key:
-        raise RuntimeError(
-            'WEBHOOK_SECRETS_KEY env not set — refusing to handle '
-            'webhook signing secrets without an encryption key. '
-            'Generate with: python -c "from cryptography.fernet '
-            'import Fernet; print(Fernet.generate_key().decode())"'
-        )
-    return Fernet(key.encode('utf-8'))
-
-
-def _encrypt(plaintext):
-    return _fernet().encrypt(plaintext.encode('utf-8')).decode('utf-8')
-
-
-def _decrypt(ciphertext):
-    try:
-        return _fernet().decrypt(ciphertext.encode('utf-8')).decode('utf-8')
-    except InvalidToken:
-        logger.error('Failed to decrypt webhook secret — wrong key?')
-        raise
+# Fernet plumbing moved to the shared secret_crypto module (#151) so the
+# webhook signing-secret and the PAT push_auth_key share one key + scheme.
+# Imported under the original private names so the rest of this module is
+# unchanged.
+from app.services.secret_crypto import encrypt as _encrypt, decrypt as _decrypt
 
 
 def _generate_secret():

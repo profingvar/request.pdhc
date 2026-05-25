@@ -7,6 +7,7 @@ from flask import current_app
 from app import db
 from app.models.security_models import ProviderAccessToken
 from app.services.audit_service import log_event
+from app.services.secret_crypto import encrypt as encrypt_secret, decrypt as decrypt_secret
 
 
 def issue_pat(provider_org_guid, contract_guid, scopes='read',
@@ -36,7 +37,7 @@ def issue_pat(provider_org_guid, contract_guid, scopes='read',
         scopes=scopes,
         delivery_mode=delivery_mode,
         push_endpoint_url=push_endpoint_url,
-        push_auth_key_encrypted=push_auth_key,  # TODO: encrypt with Fernet
+        push_auth_key_encrypted=encrypt_secret(push_auth_key),  # #151: Fernet at rest (None->None)
         expires_at=datetime.now(timezone.utc) + timedelta(days=expires_days),
         created_by_user_guid=created_by_user_guid or 'system',
     )
@@ -141,7 +142,9 @@ def rotate_pat(provider_org_guid, contract_guid, *,
     # silently switch a push-mode provider to poll.
     delivery_mode = current.delivery_mode if current else 'poll'
     push_endpoint_url = current.push_endpoint_url if current else None
-    push_auth_key = current.push_auth_key_encrypted if current else None
+    # Decrypt the carried-forward key to plaintext; issue_pat re-encrypts it
+    # (so rotation doesn't double-encrypt). #151.
+    push_auth_key = decrypt_secret(current.push_auth_key_encrypted) if current else None
     scopes = current.scopes if current else 'read'
 
     result, status = issue_pat(

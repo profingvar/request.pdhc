@@ -21,6 +21,7 @@ from app.models.service_request_models import (
 )
 from app.services.auth_service import get_upstream_token
 from app.services.audit_service import log_event
+from app.services.secret_crypto import decrypt as decrypt_secret
 
 
 def _headers():
@@ -497,5 +498,5 @@ def _get_provider_endpoint(provider_org_guid):
             logger.warning('SSRF blocked: push_endpoint_url=%s org=%s reason=%s',
                            pat.push_endpoint_url, provider_org_guid, str(e))
             return None, None
-        return pat.push_endpoint_url, pat.push_auth_key_encrypted
+        return pat.push_endpoint_url, decrypt_secret(pat.push_auth_key_encrypted)  # #151: decrypt for use
     return None, None
