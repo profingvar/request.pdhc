@@ -387,6 +387,11 @@ def revoke_view(guid):
         flash('ServiceRequest revoked', 'success')
     else:
         flash(f"Error: {data.get('message', 'Unknown')}", 'danger')
+    next_url = request.form.get('next')
+    if next_url == 'archived':
+        return redirect(url_for('service_requests_web.archived_view'))
+    if next_url == 'list':
+        return redirect(url_for('service_requests_web.list_view'))
     return redirect(url_for('service_requests_web.view_detail', guid=guid))
 
 

@@ -157,6 +157,9 @@
   <form method="POST" action="{{ url_for('service_requests_web.archive_view', guid=sr.guid) }}" style="display:inline;">
     <button type="submit" class="btn btn-secondary" onclick="return confirm('Archive this ServiceRequest?')">Archive</button>
   </form>
+  {% endif %}
+  {# Revoke stays available for archived SRs too — archive only hides, it does not cancel. #}
+  {% if sr.status != 'revoked' %}
   <form method="POST" action="{{ url_for('service_requests_web.revoke_view', guid=sr.guid) }}" style="display:inline;">
     <button type="submit" class="btn btn-danger" onclick="return confirm('Revoke this ServiceRequest?')">Revoke</button>
   </form>
