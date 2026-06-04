@@ -4,6 +4,8 @@ import bleach
 from flask import Blueprint, jsonify, request
 from app.middleware.auth_middleware import requires_auth, requires_role
 from app.services import service_request_service, contract_service, plan_definition_service
+from app.services import patient_service
+from app.services.audit_service import log_event
 from app.services.auth_service import get_current_user_guid, get_current_access_blob
 
 service_requests_bp = Blueprint('service_requests_api', __name__)
@@ -13,7 +15,13 @@ service_requests_bp = Blueprint('service_requests_api', __name__)
 @requires_auth
 @requires_role('read_write')
 def create():
-    """Create a new draft ServiceRequest."""
+    """Create a new draft ServiceRequest.
+
+    PDL Ch 4 §§ 1-2 need-to-know gate (ticket #225): a non-admin
+    caller may only create an SR for a patient assigned to at least
+    one of their organisations. SU admins bypass the gate; every
+    bypass and every denial is audited.
+    """
     payload = request.get_json(silent=True)
     if not payload:
         return jsonify({'code': 'bad_request', 'message': 'Request body required'}), 400
@@ -23,16 +31,92 @@ def create():
     if not patient_guid or not plan_definition_guid:
         return jsonify({'code': 'bad_request',
                         'message': 'patient_guid and plan_definition_guid are required'}), 400
+    patient_guid = bleach.clean(patient_guid)
 
     blob = get_current_access_blob()
+    is_su = bool(blob.get('is_su_admin', False)) if blob else False
+    caller_org_ids = set(blob.get('organization_ids') or []) if blob else set()
+    caller_user_guid = get_current_user_guid()
+
+    # ---- patient-org authorisation gate ---------------------------
+    if not is_su:
+        patient_clinic_guids, ips_status = \
+            patient_service.get_patient_clinic_guids(patient_guid)
+        if ips_status == 404:
+            log_event(
+                user_guid=caller_user_guid,
+                action='service_request.create.denied',
+                resource_type='ServiceRequest',
+                data_subject_guid=patient_guid,
+                ip_address=request.remote_addr,
+                details={
+                    'reason': 'patient_not_found',
+                    'plan_definition_guid': plan_definition_guid,
+                    'caller_org_ids': sorted(caller_org_ids),
+                },
+            )
+            return jsonify({'code': 'not_found',
+                            'message': f'Patient {patient_guid} not found'}), 404
+        if ips_status >= 500:
+            # Upstream IPS failure — fail closed (do NOT create the SR
+            # without a valid affiliation check). Audit + 502.
+            log_event(
+                user_guid=caller_user_guid,
+                action='service_request.create.denied',
+                resource_type='ServiceRequest',
+                data_subject_guid=patient_guid,
+                ip_address=request.remote_addr,
+                details={
+                    'reason': 'ips_lookup_failed',
+                    'ips_status': ips_status,
+                    'plan_definition_guid': plan_definition_guid,
+                },
+            )
+            return jsonify({'code': 'upstream_error',
+                            'message': 'Could not verify patient affiliation; '
+                                       'try again shortly.'}), 502
+        if not (caller_org_ids & set(patient_clinic_guids)):
+            log_event(
+                user_guid=caller_user_guid,
+                action='service_request.create.denied',
+                resource_type='ServiceRequest',
+                data_subject_guid=patient_guid,
+                ip_address=request.remote_addr,
+                details={
+                    'reason': 'patient_org_mismatch',
+                    'plan_definition_guid': plan_definition_guid,
+                    'caller_org_ids': sorted(caller_org_ids),
+                    'patient_clinic_guids': sorted(patient_clinic_guids),
+                },
+            )
+            return jsonify({
+                'code': 'forbidden',
+                'message': ('Patient is not assigned to any clinic in your '
+                            'organisations; create denied per PDL Ch 4 §§ 1-2.'),
+            }), 403
+    else:
+        # SU admin bypass — auditable.
+        log_event(
+            user_guid=caller_user_guid,
+            action='service_request.create.admin_bypass',
+            resource_type='ServiceRequest',
+            data_subject_guid=patient_guid,
+            ip_address=request.remote_addr,
+            details={
+                'plan_definition_guid': plan_definition_guid,
+                'reason': 'caller_is_su_admin',
+            },
+        )
+    # ---- end of authorisation gate --------------------------------
+
     org_guid = (blob.get('organization_ids') or [None])[0] if blob else None
     org_name = (blob.get('organization_names') or [None])[0] if blob else None
     user_name = blob.get('display_name', blob.get('email', '')) if blob else None
 
     data, status = service_request_service.create_service_request(
-        patient_guid=bleach.clean(patient_guid),
+        patient_guid=patient_guid,
         plan_definition_guid=bleach.clean(plan_definition_guid),
-        user_guid=get_current_user_guid(),
+        user_guid=caller_user_guid,
         org_guid=org_guid,
         user_name=user_name,
         org_name=org_name,

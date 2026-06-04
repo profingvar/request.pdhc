@@ -3,7 +3,11 @@ import pytest
 
 # Force test configuration before any imports
 os.environ['AUTH_DISABLED'] = 'true'
-os.environ['FLASK_ENV'] = 'testing'
+# AUTH_DISABLED=true requires FLASK_ENV=development per app/config.py
+# (guard added in commit 1967608). Tests are dev-bypass; using
+# 'development' here keeps the guard satisfied without changing the
+# production-safety semantics.
+os.environ['FLASK_ENV'] = 'development'
 os.environ['DATABASE_URL'] = 'sqlite:///test_request_pdhc.db'
 os.environ['HMAC_SECRET'] = 'test-hmac-secret-for-pytest-minimum-32-chars'
 os.environ['INTERNAL_SERVICE_KEY'] = 'test-internal-service-key-12345'

@@ -74,3 +74,34 @@ def delete_patient(guid):
         return resp.json(), resp.status_code
     except requests.RequestException as e:
         return {'code': 'upstream_error', 'message': str(e)}, 502
+
+
+def get_patient_clinic_guids(patient_guid):
+    """Return the list of clinic GUIDs a patient is assigned to via
+    ips.pdhc PatientClinicAssignment.
+
+    Used by ServiceRequest create to enforce patient-org need-to-know
+    (PDL Ch 4 §§ 1-2; ticket #225).
+
+    Returns:
+        (clinic_guids: list[str], status: int)
+        On success: ([...], 200) — may be empty list when patient has
+        no assignments.
+        On not-found: ([], 404).
+        On upstream error: ([], 502 or 5xx as returned).
+    """
+    base = current_app.config['IPS_BASE_URL'].rstrip('/')
+    url = f"{base}/api/v1/patients/{patient_guid}/clinics"
+    try:
+        resp = requests.get(url, headers=_headers(), timeout=15)
+        if resp.status_code == 404:
+            return [], 404
+        resp.raise_for_status()
+        clinics = resp.json() or []
+        return [c.get('guid') for c in clinics if c.get('guid')], 200
+    except requests.RequestException as e:
+        current_app.logger.warning(
+            "ips.pdhc patient-clinics lookup failed for %s: %s",
+            patient_guid, e,
+        )
+        return [], 502
