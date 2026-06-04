@@ -235,3 +235,148 @@ def test_missing_patient_guid_still_400(client, db_session, stub_service_create)
         )
     assert resp.status_code == 400
     stub_service_create.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Explicit requesting-org choice (ticket #226 — Lag 2022:913)
+# ---------------------------------------------------------------------------
+
+def test_multi_org_caller_without_pick_is_400(client, db_session, stub_service_create):
+    """A user with > 1 affiliation MUST specify requesting_org_guid;
+    silent first-pick was the antipattern this ticket removed."""
+    with patch("app.api.service_requests.get_current_access_blob",
+               return_value=_blob(is_su=False, org_ids=[CLINIC_A, CLINIC_B])), \
+         patch("app.api.service_requests.get_current_user_guid",
+               return_value=USER_GUID), \
+         patch("app.api.service_requests.patient_service."
+               "get_patient_clinic_guids") as ips_mock:
+        resp = client.post(
+            "/api/v1/ServiceRequest",
+            json={"patient_guid": PATIENT, "plan_definition_guid": PLANDEF},
+        )
+    assert resp.status_code == 400
+    body = resp.get_json()
+    assert body["code"] == "bad_request"
+    assert "requesting_org_guid" in body["message"]
+    # Patient gate never ran — auth on the choice came first.
+    ips_mock.assert_not_called()
+    stub_service_create.assert_not_called()
+    rows = _audit_rows("service_request.create.denied")
+    assert len(rows) == 1
+    assert rows[0].details["reason"] == "requesting_org_required"
+
+
+def test_multi_org_caller_with_explicit_pick_lands_in_create(
+        client, db_session, stub_service_create):
+    """A multi-org caller's explicit pick flows through to
+    create_service_request as org_guid + audit captures it."""
+    with patch("app.api.service_requests.get_current_access_blob",
+               return_value=_blob(is_su=False, org_ids=[CLINIC_A, CLINIC_B])), \
+         patch("app.api.service_requests.get_current_user_guid",
+               return_value=USER_GUID), \
+         patch("app.api.service_requests.patient_service."
+               "get_patient_clinic_guids",
+               return_value=([CLINIC_A], 200)):
+        resp = client.post(
+            "/api/v1/ServiceRequest",
+            json={
+                "patient_guid": PATIENT,
+                "plan_definition_guid": PLANDEF,
+                "requesting_org_guid": CLINIC_B,
+            },
+        )
+    assert resp.status_code == 201
+    # The chosen org made it into the underlying create call.
+    kwargs = stub_service_create.call_args.kwargs
+    assert kwargs["org_guid"] == CLINIC_B
+    # And it's recorded in the requested-audit row.
+    rows = _audit_rows("service_request.create.requested")
+    assert len(rows) == 1
+    assert rows[0].details["requesting_org_guid"] == CLINIC_B
+    assert rows[0].details["org_choice_mode"] == "caller_specified"
+    assert rows[0].details["caller_org_ids_count"] == 2
+
+
+def test_explicit_pick_not_in_caller_orgs_is_403(
+        client, db_session, stub_service_create):
+    """The chosen org must be one of the caller's affiliations."""
+    ROGUE_ORG = "clinic-rogue-guid"
+    with patch("app.api.service_requests.get_current_access_blob",
+               return_value=_blob(is_su=False, org_ids=[CLINIC_A, CLINIC_B])), \
+         patch("app.api.service_requests.get_current_user_guid",
+               return_value=USER_GUID), \
+         patch("app.api.service_requests.patient_service."
+               "get_patient_clinic_guids") as ips_mock:
+        resp = client.post(
+            "/api/v1/ServiceRequest",
+            json={
+                "patient_guid": PATIENT,
+                "plan_definition_guid": PLANDEF,
+                "requesting_org_guid": ROGUE_ORG,
+            },
+        )
+    assert resp.status_code == 403
+    body = resp.get_json()
+    assert body["code"] == "forbidden"
+    # IPS lookup short-circuited; we deny on the choice itself.
+    ips_mock.assert_not_called()
+    stub_service_create.assert_not_called()
+    rows = _audit_rows("service_request.create.denied")
+    assert len(rows) == 1
+    assert rows[0].details["reason"] == "requesting_org_not_in_caller_orgs"
+    assert rows[0].details["requesting_org_guid"] == ROGUE_ORG
+
+
+def test_single_org_caller_autofills(client, db_session, stub_service_create):
+    """The pre-#226 ergonomics for single-org callers are preserved —
+    no need to specify the pick, server fills it in."""
+    with patch("app.api.service_requests.get_current_access_blob",
+               return_value=_blob(is_su=False, org_ids=[CLINIC_A])), \
+         patch("app.api.service_requests.get_current_user_guid",
+               return_value=USER_GUID), \
+         patch("app.api.service_requests.patient_service."
+               "get_patient_clinic_guids",
+               return_value=([CLINIC_A], 200)):
+        resp = client.post(
+            "/api/v1/ServiceRequest",
+            json={"patient_guid": PATIENT, "plan_definition_guid": PLANDEF},
+        )
+    assert resp.status_code == 201
+    kwargs = stub_service_create.call_args.kwargs
+    assert kwargs["org_guid"] == CLINIC_A
+    rows = _audit_rows("service_request.create.requested")
+    assert len(rows) == 1
+    assert rows[0].details["requesting_org_guid"] == CLINIC_A
+    assert rows[0].details["org_choice_mode"] == "auto_single_org"
+
+
+def test_su_admin_can_explicitly_choose_any_org(
+        client, db_session, stub_service_create):
+    """SU admin's organization_ids is empty by convention, but they may
+    legitimately act on behalf of any org. The chosen org must flow
+    through and the audit must capture it."""
+    SU_CHOSEN_ORG = "clinic-su-chosen-guid"
+    with patch("app.api.service_requests.get_current_access_blob",
+               return_value=_blob(is_su=True, org_ids=[])), \
+         patch("app.api.service_requests.get_current_user_guid",
+               return_value=USER_GUID), \
+         patch("app.api.service_requests.patient_service."
+               "get_patient_clinic_guids") as ips_mock:
+        resp = client.post(
+            "/api/v1/ServiceRequest",
+            json={
+                "patient_guid": PATIENT,
+                "plan_definition_guid": PLANDEF,
+                "requesting_org_guid": SU_CHOSEN_ORG,
+            },
+        )
+    assert resp.status_code == 201
+    # SU path: IPS lookup is skipped.
+    ips_mock.assert_not_called()
+    kwargs = stub_service_create.call_args.kwargs
+    assert kwargs["org_guid"] == SU_CHOSEN_ORG
+    # Bypass row records the chosen org.
+    bypass_rows = _audit_rows("service_request.create.admin_bypass")
+    assert len(bypass_rows) == 1
+    assert bypass_rows[0].details["requesting_org_guid"] == SU_CHOSEN_ORG
+    assert bypass_rows[0].details["org_choice_mode"] == "caller_specified"

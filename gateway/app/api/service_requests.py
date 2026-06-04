@@ -11,6 +11,22 @@ from app.services.auth_service import get_current_user_guid, get_current_access_
 service_requests_bp = Blueprint('service_requests_api', __name__)
 
 
+def _name_for_org(org_guid, org_ids, org_names):
+    """Look up the human-readable name of ``org_guid`` from the
+    caller's parallel ``organization_ids`` / ``organization_names``
+    lists. Returns None when the guid isn't in the caller's list (eg.
+    SU admins choosing for another org)."""
+    if not org_guid or not org_ids:
+        return None
+    try:
+        idx = org_ids.index(org_guid)
+    except ValueError:
+        return None
+    if 0 <= idx < len(org_names):
+        return org_names[idx]
+    return None
+
+
 @service_requests_bp.route('/ServiceRequest', methods=['POST'])
 @requires_auth
 @requires_role('read_write')
@@ -35,8 +51,67 @@ def create():
 
     blob = get_current_access_blob()
     is_su = bool(blob.get('is_su_admin', False)) if blob else False
-    caller_org_ids = set(blob.get('organization_ids') or []) if blob else set()
+    caller_org_ids_list = list(blob.get('organization_ids') or []) if blob else []
+    caller_org_names_list = list(blob.get('organization_names') or []) if blob else []
+    caller_org_ids = set(caller_org_ids_list)
     caller_user_guid = get_current_user_guid()
+
+    # ---- explicit requesting-org choice (#226) ---------------------
+    # Lag (2022:913) requires the *acting* affiliation to be explicit
+    # for the chain-of-custody log: a multi-org user must say which of
+    # their orgs is making the request. Single-org users get auto-fill.
+    requesting_org_guid_raw = payload.get('requesting_org_guid')
+    requesting_org_guid = (bleach.clean(requesting_org_guid_raw)
+                           if requesting_org_guid_raw else None)
+    org_choice_mode = 'caller_specified'
+    if requesting_org_guid:
+        # Validate the chosen org is one of the caller's affiliations.
+        # SU admins are exempt (organization_ids is typically empty
+        # for them but they may legitimately act on behalf of any org).
+        if not is_su and requesting_org_guid not in caller_org_ids:
+            log_event(
+                user_guid=caller_user_guid,
+                action='service_request.create.denied',
+                resource_type='ServiceRequest',
+                data_subject_guid=patient_guid,
+                ip_address=request.remote_addr,
+                details={
+                    'reason': 'requesting_org_not_in_caller_orgs',
+                    'requesting_org_guid': requesting_org_guid,
+                    'caller_org_ids': sorted(caller_org_ids),
+                    'plan_definition_guid': plan_definition_guid,
+                },
+            )
+            return jsonify({
+                'code': 'forbidden',
+                'message': ('requesting_org_guid is not one of your '
+                            'organisations.'),
+            }), 403
+    elif not is_su:
+        # Non-admin: caller must pick when they have multiple
+        # affiliations. Single-org callers get auto-fill.
+        if len(caller_org_ids_list) > 1:
+            log_event(
+                user_guid=caller_user_guid,
+                action='service_request.create.denied',
+                resource_type='ServiceRequest',
+                data_subject_guid=patient_guid,
+                ip_address=request.remote_addr,
+                details={
+                    'reason': 'requesting_org_required',
+                    'caller_org_ids': sorted(caller_org_ids),
+                    'plan_definition_guid': plan_definition_guid,
+                },
+            )
+            return jsonify({
+                'code': 'bad_request',
+                'message': ('requesting_org_guid is required when you '
+                            'belong to more than one organisation '
+                            '(Lag 2022:913 chain-of-custody).'),
+            }), 400
+        if caller_org_ids_list:
+            requesting_org_guid = caller_org_ids_list[0]
+            org_choice_mode = 'auto_single_org'
 
     # ---- patient-org authorisation gate ---------------------------
     if not is_su:
@@ -105,13 +180,30 @@ def create():
             details={
                 'plan_definition_guid': plan_definition_guid,
                 'reason': 'caller_is_su_admin',
+                'requesting_org_guid': requesting_org_guid,
+                'org_choice_mode': ('caller_specified' if requesting_org_guid
+                                    else 'su_admin_unspecified'),
             },
         )
     # ---- end of authorisation gate --------------------------------
 
-    org_guid = (blob.get('organization_ids') or [None])[0] if blob else None
-    org_name = (blob.get('organization_names') or [None])[0] if blob else None
+    org_guid = requesting_org_guid
+    org_name = _name_for_org(org_guid, caller_org_ids_list, caller_org_names_list)
     user_name = blob.get('display_name', blob.get('email', '')) if blob else None
+
+    log_event(
+        user_guid=caller_user_guid,
+        action='service_request.create.requested',
+        resource_type='ServiceRequest',
+        data_subject_guid=patient_guid,
+        ip_address=request.remote_addr,
+        details={
+            'plan_definition_guid': plan_definition_guid,
+            'requesting_org_guid': org_guid,
+            'org_choice_mode': org_choice_mode,
+            'caller_org_ids_count': len(caller_org_ids_list),
+        },
+    )
 
     data, status = service_request_service.create_service_request(
         patient_guid=patient_guid,

@@ -27,6 +27,30 @@
     </select>
   </div>
 
+  {% if caller_orgs and caller_orgs|length > 1 %}
+  <div class="form-group">
+    <label for="requesting_org_guid">Requesting organisation</label>
+    <select name="requesting_org_guid" id="requesting_org_guid" class="form-control" required>
+      <option value="">-- Select organisation --</option>
+      {% for o in caller_orgs %}
+        <option value="{{ o.guid }}">{{ o.name }}</option>
+      {% endfor %}
+    </select>
+    <p style="font-size:0.85em; color:var(--text-muted); margin-top:0.4rem;">
+      You belong to multiple organisations. Pick the one acting on
+      this request (Lag 2022:913 chain-of-custody).
+    </p>
+  </div>
+  {% elif caller_orgs and caller_orgs|length == 1 %}
+  <input type="hidden" name="requesting_org_guid" value="{{ caller_orgs[0].guid }}">
+  <div class="form-group">
+    <label>Requesting organisation</label>
+    <p style="font-size:0.92em; color:var(--text-muted); margin:0;">
+      {{ caller_orgs[0].name }}
+    </p>
+  </div>
+  {% endif %}
+
   <div class="form-group">
     <label for="plan_definition_guid">PlanDefinition</label>
     <select name="plan_definition_guid" id="plan_definition_guid" class="form-control" required>

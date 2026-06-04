@@ -132,13 +132,36 @@ def create_view():
         patient_guid = request.form.get('patient_guid', '')
         plan_definition_guid = request.form.get('plan_definition_guid', '')
         notes = request.form.get('notes', '')
+        requesting_org_guid = request.form.get('requesting_org_guid', '') or None
 
         if not patient_guid or not plan_definition_guid:
             flash('Patient and PlanDefinition are required', 'danger')
         else:
             blob = get_current_access_blob()
-            org_guid = (blob.get('organization_ids') or [None])[0] if blob else None
-            org_name = (blob.get('organization_names') or [None])[0] if blob else None
+            is_su = bool(blob.get('is_su_admin', False)) if blob else False
+            caller_org_ids_list = list(blob.get('organization_ids') or []) if blob else []
+            caller_org_names_list = list(blob.get('organization_names') or []) if blob else []
+
+            # Mirror the API gate (#226): multi-org callers must pick
+            # explicitly; the chosen org must be one of theirs.
+            if requesting_org_guid and not is_su \
+                    and requesting_org_guid not in caller_org_ids_list:
+                flash('Selected organisation is not one of yours.', 'danger')
+                return redirect(url_for('service_requests_web.create_view'))
+            if not requesting_org_guid and not is_su:
+                if len(caller_org_ids_list) > 1:
+                    flash('Pick the requesting organisation '
+                          '(Lag 2022:913 chain-of-custody).', 'danger')
+                    return redirect(url_for('service_requests_web.create_view'))
+                if caller_org_ids_list:
+                    requesting_org_guid = caller_org_ids_list[0]
+
+            org_guid = requesting_org_guid
+            org_name = None
+            if org_guid and org_guid in caller_org_ids_list:
+                idx = caller_org_ids_list.index(org_guid)
+                if 0 <= idx < len(caller_org_names_list):
+                    org_name = caller_org_names_list[idx]
             user_name = blob.get('display_name', blob.get('email', '')) if blob else None
 
             data, status = service_request_service.create_service_request(
@@ -209,10 +232,24 @@ def create_view():
     else:
         forms_list = forms_data if isinstance(forms_data, list) else []
 
+    # Caller affiliations for the requesting-org picker (#226). Multi-
+    # org users must pick explicitly; single-org users see a read-only
+    # hint and the value flows as a hidden input.
+    caller_org_ids_list = blob.get('organization_ids', []) if blob else []
+    caller_org_names_list = blob.get('organization_names', []) if blob else []
+    caller_orgs = [
+        {'guid': gid,
+         'name': (caller_org_names_list[i]
+                  if i < len(caller_org_names_list) else gid)}
+        for i, gid in enumerate(caller_org_ids_list)
+    ]
+
     import json
     return render_template('service_requests/create.html',
                            patients=patients, plandefs=plandefs, forms=forms_list,
-                           plandefs_full_json=json.dumps(plandefs_full))
+                           plandefs_full_json=json.dumps(plandefs_full),
+                           caller_orgs=caller_orgs,
+                           is_su_admin=is_su)
 
 
 @service_requests_web_bp.route('/service-requests/<guid>')
