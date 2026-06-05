@@ -9,6 +9,7 @@ from app.services import patient_service, plan_definition_service, form_service
 from app.services.fhir_builder_service import build_service_request_resource, build_patient_excerpt
 from app.services.audit_service import log_event
 from app.services import scope_service
+from app.services import ips_client
 
 logger = logging.getLogger(__name__)
 
@@ -160,16 +161,32 @@ def _enqueue_dispatch_webhooks(sr, contract_guid):
 
 
 def get_service_request(guid):
-    """Get a single ServiceRequest by GUID."""
+    """Get a single ServiceRequest by GUID.
+
+    Spärr (PDL Ch 4 § 4 / ticket #228): if the patient has an active
+    block whose source_scope_id matches the SR's requester_org_guid,
+    return 404 — the SR row reveals the patient was the subject of a
+    service request from the blocked org, which is the same privacy
+    boundary as the underlying observation read.
+    """
     sr = ServiceRequest.query.filter_by(guid=guid).first()
     if not sr:
+        return {'code': 'not_found', 'message': 'ServiceRequest not found'}, 404
+    blocks = ips_client.get_active_blocks(sr.patient_guid)
+    if not ips_client.is_sr_visible(sr, blocks):
         return {'code': 'not_found', 'message': 'ServiceRequest not found'}, 404
     return sr.to_dict(), 200
 
 
 def list_service_requests(user_guid=None, org_guid=None, is_su_admin=False,
                           status_filter=None, include_archived=False, page=1, per_page=50):
-    """List ServiceRequests, filtered by organisation for non-SU users."""
+    """List ServiceRequests, filtered by organisation for non-SU users.
+
+    Spärr (PDL Ch 4 § 4 / ticket #228): after org-scoping, drop SRs
+    whose patient has blocked the SR's requester_org. The IPS lookup
+    is batched per unique patient_guid in the page and cache-bounded
+    at 30 s TTL.
+    """
     query = ServiceRequest.query
 
     if not is_su_admin and org_guid:
@@ -181,8 +198,20 @@ def list_service_requests(user_guid=None, org_guid=None, is_su_admin=False,
         query = query.filter(ServiceRequest.status.notin_(['archived', 'revoked']))
 
     query = query.order_by(ServiceRequest.created_at.desc())
-    total = query.count()
+    # Apply spärr filter after the query: the filter is per-patient (not
+    # per-org) and would be expensive to push into SQL. We fetch the
+    # page first, then drop blocked SRs. The visible count may be < the
+    # page cap; the caller should treat per_page as a soft upper bound.
     items = query.offset((page - 1) * per_page).limit(per_page).all()
+    if items:
+        patient_guids = {sr.patient_guid for sr in items if sr.patient_guid}
+        blocks_by_patient = ips_client.fetch_blocks_for_patients(patient_guids)
+        items = ips_client.filter_visible_srs(items, blocks_by_patient)
+    # Total uses an unfiltered count for pagination math — exposing
+    # the blocked count would itself leak "the patient has blocks";
+    # the page is smaller than total when spärr fires, which is the
+    # correct privacy behaviour.
+    total = query.count()
 
     return {
         'items': [sr.to_dict() for sr in items],
