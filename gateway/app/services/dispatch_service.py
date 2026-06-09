@@ -4,6 +4,10 @@ from app import db
 from app.models.dispatch_models import DispatchRequest, DispatchReceipt
 from app.services.auth_service import get_upstream_token
 from app.services.audit_service import log_event
+from app.services.ips_consent_client import (
+    consent_covers_dispatch,
+    get_active_consents,
+)
 
 
 def _headers():
@@ -15,12 +19,69 @@ def _headers():
 
 
 def create_dispatch(careplan_guid, provider_guid, assigned_user_guid=None,
-                    notes=None, idempotency_key=None, user_guid=None, ip_address=None):
+                    notes=None, idempotency_key=None, user_guid=None, ip_address=None,
+                    patient_guid=None, destination_caregiver_guid=None,
+                    payload_concept_guids=None):
     """Create and submit a dispatch request.
+
+    Ticket #229 (Request PDL #5): when the caller identifies the
+    patient + destination caregiver, validate cohesive-care consent
+    (Lag 2022:913 § 5) against ips.pdhc before forwarding upstream.
+    If the destination caregiver does not hold a valid consent from
+    the patient — or the consent is concept-narrowed and a payload
+    concept falls outside — refuse with 403 and audit the refusal.
+
+    ``payload_concept_guids`` (optional) is the list of concept guids
+    the dispatch is requesting data on; when ``None`` the concept
+    check is skipped and caregiver-level consent alone suffices.
 
     Returns:
         tuple: (result_dict, status_code)
     """
+    # PDL gate before idempotency: a consent-failing dispatch must not
+    # be able to "succeed" by replaying a prior idempotency key.
+    if patient_guid and destination_caregiver_guid:
+        consents = get_active_consents(patient_guid)
+        ok, reason = consent_covers_dispatch(
+            consents,
+            destination_caregiver_guid=destination_caregiver_guid,
+            payload_concept_guids=payload_concept_guids,
+        )
+        if not ok:
+            log_event(
+                user_guid=user_guid,
+                action='careplan.dispatch.refused',
+                resource_type='CarePlan',
+                resource_guid=careplan_guid,
+                details={
+                    'reason': reason,
+                    'provider_guid': provider_guid,
+                    'patient_guid': patient_guid,
+                    'destination_caregiver_guid': destination_caregiver_guid,
+                    'payload_concept_guids': list(payload_concept_guids or []),
+                    'pdl_basis': 'Lag (2022:913) §5',
+                },
+                ip_address=ip_address,
+                data_subject_guid=patient_guid,
+            )
+            return {
+                'code': 'consent_missing',
+                'message': (
+                    'Dispatch refused: destination caregiver has no '
+                    'valid consent (Lag 2022:913 §5).'
+                ),
+                'reason': reason,
+                'destination_caregiver_guid': destination_caregiver_guid,
+            }, 403
+    elif patient_guid or destination_caregiver_guid:
+        # Half a check is no check. Log a warning so deployments adopt
+        # the new fields together; don't refuse — soft-rollout posture.
+        current_app.logger.warning(
+            'dispatch consent check skipped: supply both patient_guid '
+            'and destination_caregiver_guid (got patient=%s caregiver=%s)',
+            bool(patient_guid), bool(destination_caregiver_guid),
+        )
+
     # Check idempotency — return existing if duplicate
     existing = DispatchRequest.query.filter_by(idempotency_key=idempotency_key).first()
     if existing:

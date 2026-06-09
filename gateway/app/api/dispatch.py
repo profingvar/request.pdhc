@@ -26,6 +26,21 @@ def submit_dispatch(guid):
     notes = payload.get('notes', '')
     idempotency_key = payload.get('idempotency_key', str(uuid.uuid4()))
 
+    # Ticket #229: optional PDL-consent gate. When both fields are
+    # present, dispatch_service refuses 403 if the destination caregiver
+    # has no valid consent from the patient (Lag 2022:913 §5).
+    patient_guid = payload.get('patient_guid')
+    destination_caregiver_guid = payload.get('destination_caregiver_guid')
+    payload_concept_guids = payload.get('payload_concept_guids') or None
+    if (
+        payload_concept_guids is not None
+        and not isinstance(payload_concept_guids, list)
+    ):
+        return jsonify({
+            'code': 'bad_request',
+            'message': 'payload_concept_guids must be a list when provided',
+        }), 400
+
     data, status = dispatch_service.create_dispatch(
         careplan_guid=guid,
         provider_guid=provider_guid,
@@ -34,6 +49,9 @@ def submit_dispatch(guid):
         idempotency_key=idempotency_key,
         user_guid=get_current_user_guid(),
         ip_address=request.remote_addr,
+        patient_guid=patient_guid,
+        destination_caregiver_guid=destination_caregiver_guid,
+        payload_concept_guids=payload_concept_guids,
     )
     return jsonify(data), status
 

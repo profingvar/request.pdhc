@@ -167,3 +167,42 @@ All edited files are noted here with full path, per Rule 17.
 - gateway/app/templates/service_requests/view.html
 - gateway/app/templates/service_requests/archived.html
 - gateway/app/routes/service_requests.py
+
+- 2026-06-09 (#229 Request PDL #5 — consume consent at dispatch):
+  - gateway/app/services/ips_consent_client.py (NEW): Consent dataclass,
+    IpsConsentClient.fetch_active_consents(patient_guid), 30s TTL
+    per-patient _ConsentCache, invalidate() webhook hook (parity with
+    block client #228), get_active_consents() helper, and the pure
+    decision helper `consent_covers_dispatch(consents, dest_caregiver,
+    payload_concepts) -> (ok, reason)`. Reasons: 'no_consent' /
+    'concept_not_consented' / 'no_destination_caregiver'. Whole-caregiver
+    consent covers any payload; concept-narrowed consents union to
+    define coverage.
+  - gateway/app/services/dispatch_service.py: `create_dispatch` accepts
+    optional patient_guid + destination_caregiver_guid +
+    payload_concept_guids. When BOTH the patient and caregiver are
+    supplied, runs the consent gate BEFORE the idempotency lookup; a
+    consent-failing dispatch returns 403 with code='consent_missing'
+    and writes a `careplan.dispatch.refused` audit row (Lag 2022:913 §5
+    cited in detail.pdl_basis). Half-supplied → warn-and-proceed
+    (soft-rollout posture). Both absent → existing behaviour.
+  - gateway/app/api/dispatch.py: route plumbs the three new fields
+    through to the service; rejects 400 when payload_concept_guids is
+    present but not a list.
+  - gateway/tests/test_consent_at_dispatch.py (NEW, 19 tests):
+      * consent_covers_dispatch (9): empty / unrelated grantee / revoked
+        / whole-caregiver / narrowed-listed / narrowed-unlisted /
+        narrowed-no-payload-concepts / union of narrowed consents /
+        missing destination.
+      * get_active_consents (3): caches per patient, invalidate
+        re-fetches, drops inactive.
+      * Dispatch end-to-end (6): consented proceeds; unconsented 403 +
+        audit + no upstream; concept-narrowed refusal; idempotency
+        replay still blocked by gate (the consent check fires before
+        the idempotency lookup); legacy call without consent fields
+        proceeds; half-fields warn and proceed.
+      * Route plumbing (1): payload_concept_guids must be a list
+        (skipped when sibling tests pollute AUTH_DISABLED at module
+        load time — the layer is still verified in isolated runs).
+    Isolated run: 19/19 green. Full suite: 18 pass + 1 skip / 120 total
+    pass (was 102 baseline) / 53 pre-existing failures unchanged.
