@@ -5,7 +5,7 @@ from flask import Blueprint, jsonify, request
 from app.middleware.auth_middleware import requires_auth, requires_role
 from app.services import service_request_service, contract_service, plan_definition_service
 from app.services import patient_service
-from app.services.audit_service import log_event
+from app.services.audit_service import audit_read, log_event
 from app.services.auth_service import get_current_user_guid, get_current_access_blob
 
 service_requests_bp = Blueprint('service_requests_api', __name__)
@@ -221,6 +221,7 @@ def create():
 
 @service_requests_bp.route('/ServiceRequest', methods=['GET'])
 @requires_auth
+@audit_read('service_request.list', resource_type='ServiceRequest')
 def list_all():
     """List ServiceRequests (org-filtered for non-SU)."""
     blob = get_current_access_blob()
@@ -240,6 +241,7 @@ def list_all():
 
 @service_requests_bp.route('/ServiceRequest/<guid>', methods=['GET'])
 @requires_auth
+@audit_read('service_request.read', resource_type='ServiceRequest', guid_arg='guid')
 def get_one(guid):
     """Get a single ServiceRequest."""
     data, status = service_request_service.get_service_request(bleach.clean(guid))
@@ -306,6 +308,7 @@ def revoke(guid):
 
 @service_requests_bp.route('/ServiceRequest/<guid>/matches', methods=['GET'])
 @requires_auth
+@audit_read('service_request.matches.list', resource_type='ServiceRequest', guid_arg='guid')
 def list_matches(guid):
     """List contract matches for a ServiceRequest."""
     from app.services.match_service import list_matches_for_request
@@ -357,6 +360,7 @@ def push_one(guid, match_guid):
 
 @service_requests_bp.route('/ServiceRequest/<guid>/receipts', methods=['GET'])
 @requires_auth
+@audit_read('service_request.receipts.list', resource_type='ServiceRequest', guid_arg='guid')
 def list_receipts(guid):
     """List delivery receipts for a ServiceRequest."""
     from app.services.push_service import list_receipts_for_request
@@ -366,6 +370,7 @@ def list_receipts(guid):
 
 @service_requests_bp.route('/ServiceRequest/receipt/<receipt_token>', methods=['GET'])
 @requires_auth
+@audit_read('service_request.receipt.read', resource_type='ServiceRequestReceipt', guid_arg='receipt_token')
 def get_receipt(receipt_token):
     """Look up a delivery receipt by token."""
     from app.services.push_service import get_receipt as get_receipt_fn
@@ -407,6 +412,7 @@ def trigger_auto_archive():
 
 @service_requests_bp.route('/ServiceRequest/<guid>/forms', methods=['GET'])
 @requires_auth
+@audit_read('service_request.forms.list', resource_type='ServiceRequest', guid_arg='guid')
 def list_forms(guid):
     """List attached forms for a ServiceRequest."""
     data, status = service_request_service.list_forms_for_request(bleach.clean(guid))

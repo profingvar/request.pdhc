@@ -7,13 +7,14 @@ import bleach
 from flask import Blueprint, jsonify, request
 from app.middleware.auth_middleware import requires_auth
 from app.services import request_feed_service
-from app.services.audit_service import log_event
+from app.services.audit_service import audit_read, log_event
 
 requests_bp = Blueprint('requests_api', __name__)
 
 
 @requests_bp.route('/requests', methods=['GET'])
 @requires_auth
+@audit_read('request.list', resource_type='ServiceRequest')
 def list_requests():
     """List dispatched requests for a provider.
 
@@ -50,6 +51,7 @@ def list_requests():
 
 @requests_bp.route('/requests/<request_guid>', methods=['GET'])
 @requires_auth
+@audit_read('request.read', resource_type='ServiceRequest', guid_arg='request_guid')
 def get_request(request_guid):
     """Get a single dispatched request by GUID."""
     request_guid = bleach.clean(request_guid)

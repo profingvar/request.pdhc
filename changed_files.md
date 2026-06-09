@@ -206,3 +206,30 @@ All edited files are noted here with full path, per Rule 17.
         load time — the layer is still verified in isolated runs).
     Isolated run: 19/19 green. Full suite: 18 pass + 1 skip / 120 total
     pass (was 102 baseline) / 53 pre-existing failures unchanged.
+
+- 2026-06-09 (#227 Request PDL #3 — read audit inventory + gap closure):
+  - gateway/app/services/audit_service.py: new `@audit_read(action,
+    resource_type=, guid_arg=)` decorator. Writes one AuditLog row
+    on 2xx, skips 4xx/5xx (no row when access didn't happen).
+    Swallows internal failures so audit table issues never break
+    the response. guid_arg defaults to a conventional list
+    (guid/patient_guid/request_guid/receipt_token/etc.).
+  - gateway/app/api/patients.py: `GET /Patient` -> patient.list;
+    `GET /Patient/<guid>` -> patient.read.
+  - gateway/app/api/careplans.py: `GET /CarePlan` -> careplan.list.
+    `GET /CarePlan/<guid>` keeps its pre-existing inline log_event
+    (action='careplan.view') so downstream consumers' filters don't
+    break.
+  - gateway/app/api/service_requests.py: 6 reads decorated —
+    service_request.{list,read,matches.list,receipts.list,
+    receipt.read,forms.list}.
+  - gateway/app/api/requests.py: `GET /requests` -> request.list;
+    `GET /requests/<guid>` -> request.read.
+  - gateway/docs/architecture.md §4.5.1 (NEW): read-side audit
+    inventory table with one row per audited endpoint, plus the
+    "adding new read endpoints" guidance.
+  - gateway/tests/test_audit_read_decorator.py (NEW, 7 tests):
+    * 2xx writes row; LIST resolves no guid; 404/5xx skip;
+      log_event failure doesn't break the response.
+    * Inventory uniqueness (action strings disjoint).
+    * Resource-type allow-list smoke.

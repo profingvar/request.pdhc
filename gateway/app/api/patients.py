@@ -2,7 +2,7 @@ import bleach
 from flask import Blueprint, jsonify, request
 from app.middleware.auth_middleware import requires_auth, requires_role
 from app.services import patient_service
-from app.services.audit_service import log_event
+from app.services.audit_service import audit_read, log_event
 from app.services.auth_service import get_current_user_guid
 
 patients_bp = Blueprint('patients_api', __name__)
@@ -10,6 +10,7 @@ patients_bp = Blueprint('patients_api', __name__)
 
 @patients_bp.route('/Patient', methods=['GET'])
 @requires_auth
+@audit_read('patient.list', resource_type='Patient')
 def list_patients():
     """List/search patients (proxy to IPS)."""
     params = dict(request.args)
@@ -19,6 +20,7 @@ def list_patients():
 
 @patients_bp.route('/Patient/<guid>', methods=['GET'])
 @requires_auth
+@audit_read('patient.read', resource_type='Patient', guid_arg='guid')
 def get_patient(guid):
     """Read a single patient by GUID."""
     guid = bleach.clean(guid)

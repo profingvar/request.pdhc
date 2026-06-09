@@ -118,6 +118,46 @@ Optional grouping layer over multiple SRs (longitudinal goals, cohort reporting)
 
 Append-only. Columns: `actor_user_guid, action, resource_type, resource_guid, before_json, after_json, at`.
 
+#### 4.5.1 Read-side audit inventory (ticket #227, PDL Ch 4 §3)
+
+Every GET endpoint that returns patient-identified data writes one
+`AuditLog` row on success (HTTP 2xx). Failed reads (4xx / 5xx) skip
+the row — the underlying access didn't happen.
+
+| Method | URL rule | `action` | `resource_type` | Wired via |
+|---|---|---|---|---|
+| GET | `/api/v1/Patient` | `patient.list` | `Patient` | `@audit_read` (#227) |
+| GET | `/api/v1/Patient/<guid>` | `patient.read` | `Patient` | `@audit_read` (#227) |
+| GET | `/api/v1/CarePlan` | `careplan.list` | `CarePlan` | `@audit_read` (#227) |
+| GET | `/api/v1/CarePlan/<guid>` | `careplan.view` | `CarePlan` | inline `log_event` (pre-#227) |
+| GET | `/api/v1/ServiceRequest` | `service_request.list` | `ServiceRequest` | `@audit_read` (#227) |
+| GET | `/api/v1/ServiceRequest/<guid>` | `service_request.read` | `ServiceRequest` | `@audit_read` (#227) |
+| GET | `/api/v1/ServiceRequest/<guid>/matches` | `service_request.matches.list` | `ServiceRequest` | `@audit_read` (#227) |
+| GET | `/api/v1/ServiceRequest/<guid>/receipts` | `service_request.receipts.list` | `ServiceRequest` | `@audit_read` (#227) |
+| GET | `/api/v1/ServiceRequest/<guid>/forms` | `service_request.forms.list` | `ServiceRequest` | `@audit_read` (#227) |
+| GET | `/api/v1/ServiceRequest/receipt/<token>` | `service_request.receipt.read` | `ServiceRequestReceipt` | `@audit_read` (#227) |
+| GET | `/api/v1/requests` | `request.list` | `ServiceRequest` | `@audit_read` (#227) |
+| GET | `/api/v1/requests/<guid>` | `request.read` | `ServiceRequest` | `@audit_read` (#227) |
+| GET | `/api/v1/provider/feed` | `feed.accessed` | (none — metadata only) | inline `log_event` |
+
+Catalogue / metadata reads that don't carry patient identifiers
+(`/Form`, `/PlanDefinition`, `/Contract`, `/providers`, `/metadata`,
+`/admin/provider-tokens`, `/docs/*`, `/api`) are intentionally
+out of scope — no patient-shaped data crosses them.
+
+Authoring routes (POST / PUT / DELETE) already write inline
+`log_event` rows with the matching action prefixes (`patient.create`,
+`service_request.create.requested`, etc.).
+
+##### Adding new read endpoints
+
+When you add a new GET that returns patient-identified data, decorate
+it with `@audit_read('<action>', resource_type='<Type>',
+guid_arg='<view_arg>')` from `app.services.audit_service`. The
+decorator writes one audit row on 2xx, no row on 4xx/5xx, and
+swallows internal failures so a flaky audit table can't break the
+response.
+
 ## 5) Security
 
 ### 5.1 Auth
