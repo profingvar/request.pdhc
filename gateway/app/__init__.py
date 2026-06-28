@@ -48,8 +48,9 @@ def create_app(testing=False):
                 if user:
                     login_user(user)
 
-    # Import models so they are registered with SQLAlchemy
-    from app.models import dispatch_models, audit_models, export_models, service_request_models, security_models  # noqa: F401
+    # Import models so they are registered with SQLAlchemy.
+    # #320: removed `export_models` — see deletion below.
+    from app.models import dispatch_models, audit_models, service_request_models, security_models  # noqa: F401
 
     @login_manager.user_loader
     def load_user(user_id):
@@ -69,8 +70,11 @@ def create_app(testing=False):
     from app.api.providers import providers_bp
     app.register_blueprint(providers_bp, url_prefix='/api/v1')
 
-    from app.api.export import export_bp
-    app.register_blueprint(export_bp, url_prefix='/api/v1')
+    # #320 (2026-06-28): removed legacy export_bp + careplans_bp +
+    # export_web_bp + careplans_web_bp. These all called the dead
+    # careplan_service.get_careplan proxy (which hit a plan.pdhc URL
+    # that never existed). The replacement is the #310 patient-specific
+    # CarePlan API at /api/v1/careplans (registered below).
 
     from app.api.requests import requests_bp
     app.register_blueprint(requests_bp, url_prefix='/api/v1')
@@ -106,8 +110,8 @@ def create_app(testing=False):
     from app.routes.dispatch import dispatch_web_bp
     app.register_blueprint(dispatch_web_bp)
 
-    from app.routes.export import export_web_bp
-    app.register_blueprint(export_web_bp)
+    # #320: removed export_web_bp (web for the dead /CarePlan/<guid>/export
+    # routes). The dispatch web blueprint (above) is unaffected.
 
     from app.routes.service_requests import service_requests_web_bp
     app.register_blueprint(service_requests_web_bp)

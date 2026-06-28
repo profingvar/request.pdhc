@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Dispatch CarePlan — request.pdhc{% endblock %}
+{% block title %}Dispatch PlanDefinition — request.pdhc{% endblock %}
 
 {% block content %}
-<h1>Dispatch CarePlan</h1>
-<p>CarePlan: <code>{{ careplan_guid }}</code></p>
+<h1>Dispatch PlanDefinition</h1>
+<p>PlanDefinition: <code>{{ careplan_guid }}</code></p>
 
 <div class="card">
   <form method="POST" action="{{ url_for('dispatch_web.dispatch_form', guid=careplan_guid) }}">
@@ -28,7 +28,9 @@
     </div>
     <div style="display:flex; gap:0.5rem; margin-top:1rem;">
       <button type="submit" class="btn btn-success">Submit Dispatch</button>
-      <a href="{{ url_for('careplans_web.view_careplan', guid=careplan_guid) }}" class="btn btn-secondary">Cancel</a>
+      {# #320 (2026-06-28): legacy careplans_web blueprint was deleted.
+         Cancel returns to the dashboard. #}
+      <a href="{{ url_for('main.dashboard') }}" class="btn btn-secondary">Cancel</a>
     </div>
   </form>
 </div>

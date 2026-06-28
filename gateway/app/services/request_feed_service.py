@@ -8,7 +8,13 @@ from datetime import datetime, timezone
 from flask import current_app
 from app import db
 from app.models.dispatch_models import DispatchRequest, DispatchReceipt
-from app.services import careplan_service
+# #320 (2026-06-28): careplan_service deleted (dead proxy). The
+# dispatch feed previously joined CarePlan title + patient + activities
+# from a plan.pdhc upstream call, but that upstream never existed and
+# the join silently degraded to empty patient + activities anyway. The
+# feed now returns the dispatch row without those joined fields. Future
+# real enrichment can read from the local #310 CarePlan model + its
+# plan_definition_snapshot.
 
 
 def list_requests_for_provider(provider_guid, since=None, cursor=None,
@@ -124,51 +130,14 @@ def update_provider_status(request_guid, provider_guid, new_status):
 def _build_request_entry(dispatch_req, receipt):
     """Build the response entry for one dispatch request.
 
-    Matches the assumed format in subscription_design Section 6."""
-    careplan_data = None
-    try:
-        cp_data, cp_status = careplan_service.get_careplan(dispatch_req.plan_definition_guid)
-        if cp_status == 200:
-            careplan_data = cp_data
-    except Exception:
-        pass
-
-    # Build patient stub from careplan if available
-    patient = {}
-    if careplan_data:
-        subject = careplan_data.get('subject', {})
-        patient = {
-            'patient_guid': subject.get('reference', '').split('/')[-1] if subject.get('reference') else '',
-            'name': subject.get('display', ''),
-        }
-
-    # Build activities from careplan
-    activities = []
-    if careplan_data:
-        for act in careplan_data.get('activity', []):
-            detail = act.get('detail', act.get('plannedActivityDetail', {}))
-            code_data = detail.get('code', {}) if isinstance(detail, dict) else {}
-            codings = code_data.get('coding', []) if isinstance(code_data, dict) else []
-
-            transactions = []
-            if codings:
-                transactions.append({
-                    'transaction_guid': act.get('id', ''),
-                    'concept_guid': codings[0].get('code', '') if codings else '',
-                    'concept_name': codings[0].get('display', '') if codings else '',
-                    'response_type': 'text',
-                    'valueset_values': [],
-                    'unit': None,
-                    'required': True,
-                })
-
-            activities.append({
-                'activity_guid': act.get('id', ''),
-                'title': detail.get('description', '') if isinstance(detail, dict) else '',
-                'transactions': transactions,
-            })
-
-    entry = {
+    #320 (2026-06-28): the historical implementation tried to enrich
+    each entry with patient + activities pulled from a plan.pdhc
+    CarePlan upstream that never existed; the call always failed and
+    the entry shipped empty `patient` + `activities`. The dead path
+    has been removed. Future enrichment can read the local #310
+    CarePlan model's `plan_definition_snapshot` instead.
+    """
+    return {
         'request_guid': dispatch_req.guid,
         'receipt_token': receipt.receipt_token if receipt else None,
         'provider_guid': dispatch_req.provider_guid,
@@ -178,12 +147,12 @@ def _build_request_entry(dispatch_req, receipt):
         'created_at': dispatch_req.created_at.isoformat(),
         'updated_at': dispatch_req.updated_at.isoformat(),
         'careplan': {
-            # #318: emit both keys during the deprecation window.
+            # #318 deprecation window: emit canonical + legacy alias.
             'plan_definition_guid': dispatch_req.plan_definition_guid,
             'careplan_guid': dispatch_req.plan_definition_guid,
-            'title': careplan_data.get('title', '') if careplan_data else '',
-            'patient': patient,
-            'activities': activities,
+            'title': '',
+            'patient': {},
+            'activities': [],
             'dispatch_metadata': {
                 'dispatched_at': dispatch_req.created_at.isoformat(),
                 'due_at': None,
@@ -192,5 +161,3 @@ def _build_request_entry(dispatch_req, receipt):
             },
         },
     }
-
-    return entry

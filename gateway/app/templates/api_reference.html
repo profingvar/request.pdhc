@@ -213,28 +213,26 @@
     </div>
 
     <div class="api-section" id="careplan">
-      <h2>7) CarePlan</h2>
+      <h2>7) CarePlan (patient-specific instance, #310)</h2>
       <table>
         <thead><tr><th>Method</th><th>Path</th><th>Role</th><th>Purpose</th></tr></thead>
         <tbody>
-          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/CarePlan</code></td><td><span class="scope-pill">any</span></td><td>List care plans (org-filtered)</td></tr>
-          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/CarePlan/&lt;guid&gt;</code></td><td><span class="scope-pill">any</span></td><td>Full care plan + nested SRs</td></tr>
-          <tr><td><span class="method method-POST">POST</span></td><td><code>/api/v1/CarePlan/&lt;guid&gt;/dispatch</code></td><td><span class="scope-pill">clinical-lead</span></td><td>Force-dispatch all SRs in this care plan</td></tr>
-          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/CarePlan/&lt;guid&gt;/dispatch/&lt;receipt_token&gt;</code></td><td><span class="scope-pill">any</span></td><td>Read a single dispatch receipt by token</td></tr>
+          <tr><td><span class="method method-POST">POST</span></td><td><code>/api/v1/careplans</code></td><td><span class="scope-pill">any</span></td><td>Create CarePlan from a PlanDefinition for a patient</td></tr>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/careplans/&lt;guid&gt;</code></td><td><span class="scope-pill">any</span></td><td>Read one CarePlan</td></tr>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/careplans?patient_guid=&lt;p&gt;</code></td><td><span class="scope-pill">any</span></td><td>List a patient's CarePlans</td></tr>
+          <tr><td><span class="method method-PUT">PUT</span></td><td><code>/api/v1/careplans/&lt;guid&gt;</code></td><td><span class="scope-pill">read_write</span></td><td>Update status / goals / period / care team</td></tr>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/careplans/&lt;guid&gt;/context</code></td><td><span class="scope-pill">any</span></td><td>Resolved provenance: CarePlan → PlanDefinition snapshot → transactions</td></tr>
+          <tr><td><span class="method method-POST">POST</span></td><td><code>/api/v1/PlanDefinition/&lt;guid&gt;/dispatch</code></td><td><span class="scope-pill">read_write</span></td><td>Dispatch a PlanDefinition to a provider (#318; legacy <code>/CarePlan/&lt;guid&gt;/dispatch</code> still alias)</td></tr>
+          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/PlanDefinition/&lt;guid&gt;/dispatch/&lt;receipt_token&gt;</code></td><td><span class="scope-pill">any</span></td><td>Read a dispatch receipt by token</td></tr>
         </tbody>
       </table>
     </div>
 
-    <div class="api-section" id="export">
-      <h2>8) Export</h2>
-      <table>
-        <thead><tr><th>Method</th><th>Path</th><th>Role</th><th>Purpose</th></tr></thead>
-        <tbody>
-          <tr><td><span class="method method-GET">GET</span></td><td><code>/api/v1/CarePlan/&lt;guid&gt;/export/preview</code></td><td><span class="scope-pill">any</span></td><td>Preview rows (no download)</td></tr>
-          <tr><td><span class="method method-POST">POST</span></td><td><code>/api/v1/CarePlan/&lt;guid&gt;/export/csv</code></td><td><span class="scope-pill">read_write</span></td><td>Stream CSV (clinical-lead reporting)</td></tr>
-        </tbody>
-      </table>
-    </div>
+    {# #320 (2026-06-28): the "Export" section is removed. The legacy
+       /CarePlan/<guid>/export/preview + /export/csv endpoints proxied
+       a plan.pdhc URL that never existed and returned 502 for every
+       caller. A real export can be added against the #310 CarePlan
+       model when needed. #}
 
     <div class="api-section" id="requests">
       <h2>9) Requests (queue / reporting)</h2>
