@@ -78,6 +78,12 @@ def create_app(testing=False):
     from app.api.service_requests import service_requests_bp
     app.register_blueprint(service_requests_bp, url_prefix='/api/v1')
 
+    # #310: patient-specific CarePlan instance (the real one).
+    # Distinct from the legacy `careplans_bp` (CarePlan proxy to
+    # plan.pdhc, kept for now under /api/v1/CarePlan).
+    from app.api.care_plans import care_plans_bp
+    app.register_blueprint(care_plans_bp, url_prefix='/api/v1')
+
     from app.api.capability import capability_bp
     app.register_blueprint(capability_bp, url_prefix='/api/v1')
 

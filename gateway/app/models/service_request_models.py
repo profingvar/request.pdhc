@@ -21,6 +21,12 @@ class ServiceRequest(db.Model):
     plan_definition_guid = db.Column(db.String(36), nullable=False)
     plan_definition_snapshot = db.Column(db.JSON, nullable=True)
 
+    # CarePlan (the patient-specific instance, since #310). Optional —
+    # SRs issued directly against a PlanDefinition leave it NULL
+    # (legacy / direct workflow). When set, the chain
+    # SR → CarePlan → PlanDefinition gives full provenance.
+    care_plan_guid = db.Column(db.String(36), nullable=True, index=True)
+
     # Assembled FHIR R5 ServiceRequest resource
     fhir_resource = db.Column(db.JSON, nullable=True)
 
