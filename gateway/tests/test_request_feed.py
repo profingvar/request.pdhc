@@ -18,7 +18,7 @@ def sample_dispatch(app):
     with app.app_context():
         dr = DispatchRequest(
             guid=str(uuid.uuid4()),
-            careplan_guid='cp-test-001',
+            plan_definition_guid='cp-test-001',
             provider_guid='provider-aaa-111',
             dispatch_notes='Test dispatch',
             status='submitted',
@@ -45,7 +45,7 @@ def multiple_dispatches(app):
         for i, prov in enumerate(['provider-aaa-111', 'provider-aaa-111', 'provider-bbb-222']):
             dr = DispatchRequest(
                 guid=str(uuid.uuid4()),
-                careplan_guid=f'cp-multi-{i}',
+                plan_definition_guid=f'cp-multi-{i}',
                 provider_guid=prov,
                 status='submitted',
                 idempotency_key=str(uuid.uuid4()),
@@ -125,7 +125,7 @@ class TestListRequests:
         with app.app_context():
             for i in range(5):
                 dr = DispatchRequest(
-                    careplan_guid=f'cp-page-{i}',
+                    plan_definition_guid=f'cp-page-{i}',
                     provider_guid='provider-pager',
                     status='submitted',
                     idempotency_key=str(uuid.uuid4()),

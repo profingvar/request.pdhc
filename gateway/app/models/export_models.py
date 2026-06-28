@@ -8,7 +8,9 @@ class ExportRecord(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     guid = db.Column(db.String(36), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
-    careplan_guid = db.Column(db.String(36), nullable=False)
+    # #318 (2026-06-28): renamed from `careplan_guid` — column always
+    # held a PlanDefinition guid; pre-#310 misnomer.
+    plan_definition_guid = db.Column(db.String(36), nullable=False)
     user_guid = db.Column(db.String(36), nullable=True)
     export_type = db.Column(db.String(20), nullable=False, default='csv')
     row_count = db.Column(db.Integer, nullable=True)
@@ -19,7 +21,9 @@ class ExportRecord(db.Model):
     def to_dict(self):
         return {
             'guid': self.guid,
-            'careplan_guid': self.careplan_guid,
+            # #318: canonical + legacy alias.
+            'plan_definition_guid': self.plan_definition_guid,
+            'careplan_guid': self.plan_definition_guid,
             'user_guid': self.user_guid,
             'export_type': self.export_type,
             'row_count': self.row_count,

@@ -26,7 +26,10 @@ class DispatchRequest(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     guid = db.Column(db.String(36), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
-    careplan_guid = db.Column(db.String(36), nullable=False)
+    # #318 (2026-06-28): renamed from `careplan_guid` — the column
+    # always held a PlanDefinition guid; pre-#310 the platform used
+    # "CarePlan" as a misnomer for PlanDefinition.
+    plan_definition_guid = db.Column(db.String(36), nullable=False)
     provider_guid = db.Column(db.String(36), nullable=False, index=True)
     assigned_user_guid = db.Column(db.String(36), nullable=True)
     dispatch_notes = db.Column(db.Text, nullable=True)
@@ -43,7 +46,10 @@ class DispatchRequest(db.Model):
     def to_dict(self):
         return {
             'guid': self.guid,
-            'careplan_guid': self.careplan_guid,
+            # #318: canonical name is plan_definition_guid; legacy
+            # alias `careplan_guid` emitted for one release.
+            'plan_definition_guid': self.plan_definition_guid,
+            'careplan_guid': self.plan_definition_guid,
             'provider_guid': self.provider_guid,
             'assigned_user_guid': self.assigned_user_guid,
             'dispatch_notes': self.dispatch_notes,

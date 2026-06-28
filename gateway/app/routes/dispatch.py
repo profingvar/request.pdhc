@@ -21,7 +21,7 @@ def dispatch_form(guid):
             flash('Provider is required', 'danger')
         else:
             data, status = dispatch_service.create_dispatch(
-                careplan_guid=guid,
+                plan_definition_guid=guid,
                 provider_guid=provider_guid,
                 assigned_user_guid=assigned_user_guid or None,
                 notes=notes,

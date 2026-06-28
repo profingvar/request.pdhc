@@ -50,7 +50,7 @@ def export_csv(guid):
     # Record the export
     user_guid = get_current_user_guid()
     export_record = ExportRecord(
-        careplan_guid=guid,
+        plan_definition_guid=guid,
         user_guid=user_guid,
         export_type='csv',
         row_count=len(rows),

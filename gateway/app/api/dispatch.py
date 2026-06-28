@@ -8,11 +8,7 @@ from app.services.auth_service import get_current_user_guid
 dispatch_bp = Blueprint('dispatch_api', __name__)
 
 
-@dispatch_bp.route('/CarePlan/<guid>/dispatch', methods=['POST'])
-@requires_auth
-@requires_role('read_write')
-def submit_dispatch(guid):
-    """Submit a CarePlan dispatch request."""
+def _submit_dispatch(guid):
     guid = bleach.clean(guid)
     payload = request.get_json(silent=True)
     if not payload:
@@ -42,7 +38,7 @@ def submit_dispatch(guid):
         }), 400
 
     data, status = dispatch_service.create_dispatch(
-        careplan_guid=guid,
+        plan_definition_guid=guid,
         provider_guid=provider_guid,
         assigned_user_guid=assigned_user_guid,
         notes=notes,
@@ -56,10 +52,30 @@ def submit_dispatch(guid):
     return jsonify(data), status
 
 
+@dispatch_bp.route('/PlanDefinition/<guid>/dispatch', methods=['POST'])
+@requires_auth
+@requires_role('read_write')
+def submit_dispatch_plan_definition(guid):
+    """Submit a PlanDefinition dispatch request (canonical route; #318)."""
+    return _submit_dispatch(guid)
+
+
+@dispatch_bp.route('/CarePlan/<guid>/dispatch', methods=['POST'])
+@requires_auth
+@requires_role('read_write')
+def submit_dispatch(guid):
+    """DEPRECATED legacy alias — pre-#310 misnomer for PlanDefinition.
+    Drop after one release cycle (#318).
+    """
+    return _submit_dispatch(guid)
+
+
+@dispatch_bp.route('/PlanDefinition/<guid>/dispatch/<receipt_token>', methods=['GET'])
 @dispatch_bp.route('/CarePlan/<guid>/dispatch/<receipt_token>', methods=['GET'])
 @requires_auth
 def get_dispatch_status(guid, receipt_token):
-    """Check dispatch status by receipt token."""
+    """Check dispatch status by receipt token. Both routes resolve
+    identically — receipt_token is the lookup key, not the guid."""
     receipt_token = bleach.clean(receipt_token)
     data, status = dispatch_service.get_dispatch_status(receipt_token)
     return jsonify(data), status

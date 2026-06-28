@@ -127,7 +127,7 @@ def _build_request_entry(dispatch_req, receipt):
     Matches the assumed format in subscription_design Section 6."""
     careplan_data = None
     try:
-        cp_data, cp_status = careplan_service.get_careplan(dispatch_req.careplan_guid)
+        cp_data, cp_status = careplan_service.get_careplan(dispatch_req.plan_definition_guid)
         if cp_status == 200:
             careplan_data = cp_data
     except Exception:
@@ -178,7 +178,9 @@ def _build_request_entry(dispatch_req, receipt):
         'created_at': dispatch_req.created_at.isoformat(),
         'updated_at': dispatch_req.updated_at.isoformat(),
         'careplan': {
-            'careplan_guid': dispatch_req.careplan_guid,
+            # #318: emit both keys during the deprecation window.
+            'plan_definition_guid': dispatch_req.plan_definition_guid,
+            'careplan_guid': dispatch_req.plan_definition_guid,
             'title': careplan_data.get('title', '') if careplan_data else '',
             'patient': patient,
             'activities': activities,

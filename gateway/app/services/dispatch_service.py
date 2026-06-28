@@ -18,10 +18,19 @@ def _headers():
     return headers
 
 
-def create_dispatch(careplan_guid, provider_guid, assigned_user_guid=None,
+def create_dispatch(plan_definition_guid=None, provider_guid=None,
+                    assigned_user_guid=None,
                     notes=None, idempotency_key=None, user_guid=None, ip_address=None,
                     patient_guid=None, destination_caregiver_guid=None,
-                    payload_concept_guids=None):
+                    payload_concept_guids=None,
+                    # #318 (2026-06-28): back-compat alias kwarg.
+                    # `careplan_guid` was the pre-#310 name for what
+                    # was always a PlanDefinition guid. Accept the
+                    # alias for one release; drop after no caller
+                    # passes it.
+                    careplan_guid=None):
+    if plan_definition_guid is None:
+        plan_definition_guid = careplan_guid
     """Create and submit a dispatch request.
 
     Ticket #229 (Request PDL #5): when the caller identifies the
@@ -52,7 +61,7 @@ def create_dispatch(careplan_guid, provider_guid, assigned_user_guid=None,
                 user_guid=user_guid,
                 action='careplan.dispatch.refused',
                 resource_type='CarePlan',
-                resource_guid=careplan_guid,
+                resource_guid=plan_definition_guid,
                 details={
                     'reason': reason,
                     'provider_guid': provider_guid,
@@ -94,7 +103,7 @@ def create_dispatch(careplan_guid, provider_guid, assigned_user_guid=None,
 
     # Create local dispatch request record
     dispatch_req = DispatchRequest(
-        careplan_guid=careplan_guid,
+        plan_definition_guid=plan_definition_guid,
         provider_guid=provider_guid,
         assigned_user_guid=assigned_user_guid,
         dispatch_notes=notes,
@@ -104,9 +113,12 @@ def create_dispatch(careplan_guid, provider_guid, assigned_user_guid=None,
     db.session.add(dispatch_req)
     db.session.flush()
 
-    # Submit to upstream
+    # Submit to upstream. #318: canonical URL is
+    # /api/v1/PlanDefinition/<guid>/dispatch; the legacy
+    # /api/v1/CarePlan/<guid>/dispatch still works on plan.pdhc as a
+    # back-compat alias for one release cycle.
     plan_base = current_app.config['PLAN_BASE_URL'].rstrip('/')
-    upstream_url = f"{plan_base}/api/v1/CarePlan/{careplan_guid}/dispatch"
+    upstream_url = f"{plan_base}/api/v1/PlanDefinition/{plan_definition_guid}/dispatch"
 
     upstream_payload = {
         'provider_guid': provider_guid,
@@ -155,7 +167,7 @@ def create_dispatch(careplan_guid, provider_guid, assigned_user_guid=None,
         user_guid=user_guid,
         action='careplan.dispatch',
         resource_type='CarePlan',
-        resource_guid=careplan_guid,
+        resource_guid=plan_definition_guid,
         details={
             'provider_guid': provider_guid,
             'dispatch_guid': dispatch_req.guid,
