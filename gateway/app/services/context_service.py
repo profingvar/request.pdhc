@@ -24,6 +24,11 @@ def get_sr_context(sr_guid):
         'requester_org_guid': sr.requester_org_guid,
         'requester_user_guid': sr.requester_user_guid,
         'requester_user_name': sr.requester_user_name,
+        # #294 / #306 phase 6: canonical clinical-context name emitted
+        # alongside the legacy `requester_org_guid` during the
+        # deprecation window. Consumers should switch to
+        # `requesting_org_guid`; legacy key removed after one release.
+        'requesting_org_guid': sr.requester_org_guid,
         'plan_definition_guid': sr.plan_definition_guid,
         'period_start': sr.period_start.isoformat() if sr.period_start else None,
         'period_end': sr.period_end.isoformat() if sr.period_end else None,

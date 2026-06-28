@@ -84,8 +84,15 @@ def _handle_status_update(sr_guid):
     if not body:
         return jsonify({'code': 'bad_request', 'message': 'JSON body required'}), 400
 
-    required = ['patient_guid', 'organisation_guid', 'grant_token', 'contract_guid']
+    # #294 / #306 phase 6: canonical wire key is `provider_org_guid`;
+    # legacy alias `organisation_guid` still accepted. Required-set
+    # check uses whichever is present.
+    body_provider_org = (body.get('provider_org_guid')
+                         or body.get('organisation_guid'))
+    required = ['patient_guid', 'grant_token', 'contract_guid']
     missing = [f for f in required if not body.get(f)]
+    if not body_provider_org:
+        missing.append('provider_org_guid')
     if missing:
         return jsonify({
             'code': 'validation_error',
@@ -93,13 +100,13 @@ def _handle_status_update(sr_guid):
         }), 400
 
     # Verify the org in the body matches the PAT
-    if body['organisation_guid'] != g.provider_org_guid:
+    if body_provider_org != g.provider_org_guid:
         log_event(
             action='report.rejected',
             details={
                 'reason': 'org_mismatch',
                 'token_org': g.provider_org_guid,
-                'body_org': body['organisation_guid'],
+                'body_org': body_provider_org,
             },
             ip_address=request.remote_addr,
         )

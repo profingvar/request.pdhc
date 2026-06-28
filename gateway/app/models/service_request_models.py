@@ -70,6 +70,12 @@ class ServiceRequest(db.Model):
             'requester_user_name': self.requester_user_name,
             'requester_org_guid': self.requester_org_guid,
             'requester_org_name': self.requester_org_name,
+            # #294 / #306 phase 6: canonical clinical-context names.
+            # Emitted alongside the legacy `requester_*` keys during
+            # the deprecation window; consumers should switch to
+            # these. Legacy keys removed after one release cycle.
+            'requesting_org_guid': self.requester_org_guid,
+            'requesting_org_name': self.requester_org_name,
             'notes': self.notes,
             'period_start': self.period_start.isoformat() if self.period_start else None,
             'period_end': self.period_end.isoformat() if self.period_end else None,
