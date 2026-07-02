@@ -412,6 +412,84 @@ All edited files are noted here with full path, per Rule 17.
     102/102 with 7 files ignored + 51 pre-existing 401 failures
     on the un-ignored subset).
 
+## 2026-07-02 — rollup #348 close-out (#381 fhir_builder_service R4→R5)
+
+  - #381 gateway/app/services/fhir_builder_service.py (REWRITTEN):
+    every finding from the ticket #381 validator run addressed.
+    - CarePlan.activity `detail` (removed in R5) replaced with
+      R5-legal `performedActivity: CodeableReference[]` wrapping
+      the transaction concept. Activity metadata (title, timing,
+      performer_type, transactions[]) previously carried on a
+      custom `activity-plan-meta` Extension is now available to
+      consumers via ServiceRequest.plan_definition_snapshot on
+      the parent SR — the custom extension isn't R5-legal without
+      a published StructureDefinition.
+    - ServiceRequest.code wrapped as CodeableReference in R5:
+      `{concept: {text: '...'}}`.
+    - ServiceRequest.supportingInfo entries are CodeableReference
+      in R5: `{reference: {reference: '...', display: '...'}}`.
+    - `authoredOn` + `occurrencePeriod.start/end` now emitted via
+      `_iso_with_tz()` which stamps `+00:00` on naive datetimes
+      (SQLite / non-tz db.DateTime columns).
+    - Contained Patient reference switched from absolute
+      `Patient/<guid>` to hash `#patient-<guid>` so dom-3 is met.
+    - Goal.target.measure now always present when target.detail
+      is (satisfies gol-1). Anchored at the goal concept.
+    - Goal.priority coded via
+      `http://terminology.hl7.org/CodeSystem/goal-priority` so the
+      Coding has a system.
+    - Questionnaire.item.type = 'choice' rewritten to 'coding' on
+      emit (R5 rename; upstream plan.pdhc still authors R4 name).
+    - Recursive `_strip_pdhc_markers()` walks the emitted resource
+      tree and removes any `_pdhc_*` keys — belt-and-braces
+      protection against caller mutations that would otherwise
+      leak internal wire markers into the FHIR envelope.
+    - Custom `requester-organization` extension replaced with a
+      spec-legal `performer[]` entry (Organization ref, sorted
+      first) — R5 has no dedicated requester-org field, but
+      performer[] is Reference[Organization|Practitioner|...] and
+      correctly conveys the requesting side.
+    - `build_patient_excerpt()` now omits empty list fields (FHIR
+      forbids exactly-empty arrays).
+    - Concept coding `system` switched from REST URLs
+      (`https://plan.pdhc.se/api/v1/concepts`) to PDHC URNs
+      (`urn:pdhc:concept`, `urn:pdhc:unit`, `urn:pdhc:valueset:*`).
+      Public tx servers don't know PDHC concepts and treating the
+      old URLs as canonical caused tx5 timeouts on every coding.
+  - #381 gateway/tests/conformance_corpus_emit.py (MODIFIED):
+    corpus scope expanded from CapabilityStatement-only to
+    CapabilityStatement + ServiceRequest + care_plan (the earlier
+    narrowing from #377 landed with the note that we'd re-expand
+    once fhir_builder was R5-fixed). The care_plan extract lifts
+    peer Goal + Patient into its own `contained[]` so hash refs
+    resolve when it's validated standalone. Patient excerpt no
+    longer carries `identifier: []` (empty-array violation).
+    Questionnaire.item.type is deliberately kept as 'choice' in
+    the fixture so the R4→R5 rename shim in fhir_builder is
+    exercised end-to-end. Answer options carry a coding.system.
+  - #381 gateway/Makefile (MODIFIED): TX_SERVER default flipped
+    from `https://tx.fhir.org/r5` to `n/a`. request.pdhc's concept
+    codings use PDHC-scoped URNs no public tx server knows about;
+    enabling tx makes validation hang 60s per unknown code (tx5
+    timeout) and then fail. Well-known HL7 codings in the CS are
+    checked from the bundled package cache and don't need tx.
+    Trade-off documented in the Makefile header.
+  - #381 gateway/tests/fhir_corpus/*.json (MODIFIED): reference
+    corpus regenerated. capability_statement + service_request +
+    care_plan.
+
+  Local `make conformance` result: 0 errors on all three resources
+  (17 notes on CS, 5 warnings + 3 notes on care_plan, 5 warnings +
+  8 notes on service_request — all informational for
+  well-known-not-verified codings; no spec violations).
+
+## 2026-07-02 — rollup #348 close-out (#365 reconcile leg)
+
+  - #365 no code changes — the reconcile leg landed 2026-07-01 as
+    `569f742` when we sha256-diffed the 104 code files against prod
+    and confirmed zero drift, then git-reset-hard to prod's state.
+    Closed via /respond only. Ticket closed for tracker hygiene.
+
 ## 2026-07-01 — rollup #348 commit-2 (#372 truth test + #376 CI)
 
   - #376 .github/workflows/test.yml (NEW): first CI for request.pdhc.

@@ -2,13 +2,12 @@
 # conformance.
 #
 # Day-to-day:
-#   make test            # run pytest (mirrors CI ignores in test.yml)
-#   make test-all        # run pytest INCLUDING the SSO-fixture files
+#   make test            # run pytest (whole suite)
 #
 # Rollup #348 conformance surface (per ADR-001 + #373 CapabilityStatement
 # rewrite): ServiceRequest with contained CarePlan/Goals/Questionnaires
 # is what request.pdhc actually emits; the CapabilityStatement itself
-# is a FHIR R5 resource too. The validator gates both.
+# is a FHIR R5 resource too. The validator gates all three.
 #
 #   make corpus          # emit CapabilityStatement + ServiceRequest +
 #                        # CarePlan into gateway/tests/fhir_corpus/*.json
@@ -24,32 +23,25 @@ VALIDATOR_JAR ?= $(HOME)/.local/share/fhir/validator_cli.jar
 CORPUS_DIR := tests/fhir_corpus
 FHIR_VERSION := 5.0.0
 
-# Terminology server. Mirrors termbank/plan.pdhc's Makefile so the
-# validator can resolve HL7-canonical URLs it needs at runtime.
-TX_SERVER ?= https://tx.fhir.org/r5
+# Terminology: `n/a` disables the terminology server. request.pdhc's
+# concept coding uses PDHC-scoped URNs (`urn:pdhc:concept`,
+# `urn:pdhc:unit`, `urn:pdhc:valueset:<guid>`) that no public tx
+# server knows about; enabling tx makes validation hang for 60s per
+# unknown code (tx5 timeout) and then fail. With tx off, the
+# validator emits "Coding is unknown; no verification" as a Note or
+# Warning (informational), which is the honest state — plan.pdhc
+# owns those code systems and only plan.pdhc can validate them. Well-
+# known HL7 codings in the CapabilityStatement are checked from the
+# bundled package cache and don't need tx either.
+TX_SERVER ?= n/a
 
 
-.PHONY: help test test-all corpus conformance check-jar
+.PHONY: help test corpus conformance check-jar
 
 help:
-	@echo "Targets: test, test-all, corpus, conformance, check-jar"
+	@echo "Targets: test, corpus, conformance, check-jar"
 
-# Mirror .github/workflows/test.yml — SSO-fixture-affected files are
-# ignored until the follow-up (ticket referenced in test.yml header) is
-# resolved. Same list, same deselection.
 test:
-	PYTHONPATH=. $(PYTEST) tests \
-		--ignore=tests/test_request_feed.py \
-		--ignore=tests/test_care_plans.py \
-		--ignore=tests/test_internal_api.py \
-		--ignore=tests/test_patients.py \
-		--ignore=tests/test_auth.py \
-		--ignore=tests/test_providers.py \
-		--ignore=tests/test_dispatch.py \
-		--deselect tests/test_consent_at_dispatch.py::TestRoutePlumbing::test_bad_payload_concept_guids_shape_is_400 \
-		-q
-
-test-all:
 	PYTHONPATH=. $(PYTEST) tests -q
 
 corpus:
