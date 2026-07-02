@@ -2,7 +2,11 @@
 
 This document is the authoritative deployment plan for the `request.pdhc` unified service. It covers every step from environment setup through a fully operational orchestrating service that combines patient lifecycle, CarePlan readout/parse/export, and CarePlan dispatch — all under one functionally coherent contract. Numbering follows the `1.a, 1.b` convention required by Rule 3.
 
-`request.pdhc` is an **orchestrating service** that proxies to live backends (`ips.pdhc.se` for Patient/IPS data, `plan.pdhc.se` for CarePlan/PlanDef data, `sso.pdhc.se` for authentication) and maintains its own local PostgreSQL for dispatch receipts, audit logs, and export metadata.
+`request.pdhc` is an **orchestrating dispatch service** that proxies to live backends (`ips.pdhc.se` for Patient/IPS data, `plan.pdhc.se` for CarePlan/PlanDef data, `sso.pdhc.se` for authentication) and maintains its own local PostgreSQL for dispatch receipts, audit logs, and workflow state.
+
+**Scope note (2026-07-02):** alerting — threshold evaluation on incoming Observations and `DetectedIssue`/`Flag` emission — is **out of scope** for this service by design. The alerting layer belongs in analyse.pdhc; request.pdhc is a dispatch envelope, not an MDR Rule 11 device. See [`docs/decisions/ADR-001-alerting-scope.md`](docs/decisions/ADR-001-alerting-scope.md).
+
+The paragraph above still uses the pre-#320 phrase "CarePlan readout/parse/export" — the export cluster was deleted 2026-06-28 in #320; a full doc sweep is deferred to a follow-up under rollup #348.
 
 ---
 

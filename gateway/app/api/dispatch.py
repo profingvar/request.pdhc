@@ -56,26 +56,21 @@ def _submit_dispatch(guid):
 @requires_auth
 @requires_role('read_write')
 def submit_dispatch_plan_definition(guid):
-    """Submit a PlanDefinition dispatch request (canonical route; #318)."""
-    return _submit_dispatch(guid)
+    """Submit a PlanDefinition dispatch request (canonical route; #318).
 
-
-@dispatch_bp.route('/CarePlan/<guid>/dispatch', methods=['POST'])
-@requires_auth
-@requires_role('read_write')
-def submit_dispatch(guid):
-    """DEPRECATED legacy alias — pre-#310 misnomer for PlanDefinition.
-    Drop after one release cycle (#318).
+    The pre-#310 misnomer `/CarePlan/<guid>/dispatch` was dropped in
+    #348 (rollup ticket, 2026-07-02) — plan.pdhc dropped its equivalent
+    alias 2026-07-01 in #334 / 32ca438, and this service followed. The
+    receipt-token GET below is likewise canonical-only.
     """
     return _submit_dispatch(guid)
 
 
 @dispatch_bp.route('/PlanDefinition/<guid>/dispatch/<receipt_token>', methods=['GET'])
-@dispatch_bp.route('/CarePlan/<guid>/dispatch/<receipt_token>', methods=['GET'])
 @requires_auth
 def get_dispatch_status(guid, receipt_token):
-    """Check dispatch status by receipt token. Both routes resolve
-    identically — receipt_token is the lookup key, not the guid."""
+    """Check dispatch status by receipt token. receipt_token is the
+    lookup key, not the guid."""
     receipt_token = bleach.clean(receipt_token)
     data, status = dispatch_service.get_dispatch_status(receipt_token)
     return jsonify(data), status

@@ -233,3 +233,75 @@ All edited files are noted here with full path, per Rule 17.
       log_event failure doesn't break the response.
     * Inventory uniqueness (action strings disjoint).
     * Resource-type allow-list smoke.
+
+- 2026-07-02 (rollup #348 commit-1 — 8 tickets in one commit):
+  Landed on top of the 2026-07-01 reconcile leg (#365) that brought
+  prod back to 569f742 = origin/main after 28 metadata-drifted
+  commits + 103 hand-edited files. Reconcile was trivial in
+  content terms — sha256 diff on 104 py/html files showed zero drift.
+
+  - #366 gateway/app/api/capability.py: deleted the `export-csv`
+    operation entry from the CarePlan resource block. Finding §1.1
+    (HIGH) — the entry pointed at `POST /api/v1/CarePlan/{id}/export/csv`,
+    which was deleted with the whole export cluster in commit 569f742
+    (#320, 2026-06-28). Advertising a 404 for weeks broke generic FHIR
+    clients that enumerate operations.
+
+  - #367 gateway/app/api/capability.py: froze `CapabilityStatement.date`
+    at module import via `os.path.getmtime(__file__)` — same file-mtime
+    pattern that terminal termbank #352 landed after prod verify
+    caught gunicorn worker fork variance (memory
+    `infra_gunicorn_worker_fork_freezes_datetime`). Consecutive
+    /fhir/metadata requests now return identical `date` and the value
+    only advances on a real image rebuild.
+
+  - #368 gateway/app/api/capability.py + gateway/app/api/dispatch.py:
+    dropped the legacy `/CarePlan/{id}/dispatch` alias — both the
+    `dispatch` operation entry in capability.py's CarePlan block AND
+    the two `@dispatch_bp.route('/CarePlan/<guid>/dispatch', ...)`
+    handlers in dispatch.py (POST submit + GET status-by-token).
+    Operator chose Y (immediate drop, no soak) at 2026-07-01 Phase C
+    signoff. Coordinated with plan.pdhc's equivalent alias drop
+    2026-07-01 in 32ca438 / #334. Canonical POST/GET on
+    `/PlanDefinition/<guid>/dispatch{,/<receipt_token>}` unchanged.
+
+  - #369 gateway/docker-compose.yml: pinned db (9061:5432) and app
+    (9060:9060) port maps to `127.0.0.1:`, so neither container is
+    LAN-reachable. Deleted the insecure `POSTGRES_PASSWORD:-request_dev_2026!`
+    fallback from all three sites (`db.environment`, `app.environment`,
+    `worker.environment`) — compose now uses `${POSTGRES_PASSWORD:?...}`
+    and refuses to start without an explicit value in .env. Prod .env
+    verified to have POSTGRES_USER/PASSWORD/DB set before the change.
+
+  - #370 gateway/entrypoint.sh: added `--access-logfile -` and
+    `--access-logformat '%(t)s %(h)s "%(r)s" %(s)s %(L)ss'` to the
+    gunicorn invocation. Access lines now land in
+    `docker logs request_pdhc_app`, matching plan.pdhc / termbank /
+    the rest of the platform. Enables any future soak-then-drop
+    workflow analogous to plan.pdhc #334 / this batch's #368.
+
+  - #371 gateway/docker-compose.yml: added `restart: unless-stopped`
+    to db and app services (worker already had it). All three
+    request.pdhc containers now respawn on docker daemon restart /
+    macmini reboot — matches memory
+    `infra_platform_robustness_post_2026-05-10`.
+
+  - #373 gateway/app/api/capability.py: rewrote the CarePlan
+    resource block to advertise the real patient-CarePlan API from
+    #310. Interactions: `[create, read, update, search-type]`.
+    Operations: `context` at `GET /api/v1/careplans/{guid}/context`
+    (documented). searchParam: `patient_guid` (reference) and
+    `status` (token). Description of the service updated to reflect
+    the dispatch-envelope role and point at ADR-001.
+
+  - #374 docs/decisions/ADR-001-alerting-scope.md (NEW) + readme.md +
+    describe_request.pdhc.md: first ADR file for the repo. Documents
+    that alerting (threshold evaluation + DetectedIssue/Flag
+    emission) is out of scope for request.pdhc by design; the
+    alerting layer belongs in analyse.pdhc when built. Rationale
+    grounded in the operator's 2026-07-01 note "request does not
+    receive any data." MDR consequence spelled out: request.pdhc is
+    NOT a Rule 11 device. ADR marked revocable. Short pointers to
+    the ADR added at the top of readme.md and describe_request.pdhc.md;
+    the full 656-line describe sweep stays deferred under finding
+    §10.1 (child ticket #379).

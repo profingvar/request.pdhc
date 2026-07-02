@@ -1,5 +1,19 @@
 # request.pdhc — Unified Functional Service Specification
 
+> **Scope note (2026-07-02, rollup #348 / ADR-001):** alerting —
+> threshold evaluation on incoming Observations and
+> `DetectedIssue`/`Flag` emission — is **out of scope** for this
+> service. The alerting layer belongs in analyse.pdhc. request.pdhc is
+> a dispatch envelope, not an MDR Rule 11 device. See
+> [`docs/decisions/ADR-001-alerting-scope.md`](docs/decisions/ADR-001-alerting-scope.md)
+> for the boundary + rationale + reversibility.
+
+> **Deferred doc sweep:** this file (656 lines) still reflects the
+> pre-#320 phrasing in places (`careplan-readout`, "export" cluster).
+> A full sweep is tracked under rollup #348 finding §10.1; it will land
+> after Phase E surgical work closes. Trust the code and the ADR over
+> paragraph text here.
+
 ## 1) Purpose
 
 `request.pdhc` is the unified service boundary that combines all functional capabilities currently split across:

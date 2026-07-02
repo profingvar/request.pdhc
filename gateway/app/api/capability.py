@@ -1,7 +1,20 @@
+import os
 from datetime import datetime, timezone
 from flask import Blueprint, jsonify
 
 capability_bp = Blueprint('capability', __name__)
+
+# CapabilityStatement.date must be stable across requests AND across
+# gunicorn workers (ticket #367 / rollup #348). Default gunicorn config
+# forks workers post-import, so `datetime.now()` at module level runs
+# once per worker and consecutive requests to different workers see
+# different microseconds. Using this file's mtime gives a value that's
+# identical across workers (they all read the same file baked into the
+# same container image) and only advances on a real image rebuild.
+# See memory `infra_gunicorn_worker_fork_freezes_datetime`.
+_CAPABILITYSTATEMENT_DATE = datetime.fromtimestamp(
+    os.path.getmtime(__file__), tz=timezone.utc
+).strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
 @capability_bp.route('/metadata', methods=['GET'])
@@ -15,12 +28,16 @@ def capability_statement():
         'name': 'RequestPDHCCapabilityStatement',
         'title': 'request.pdhc Unified Service',
         'status': 'active',
-        'date': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+        'date': _CAPABILITYSTATEMENT_DATE,
         'publisher': 'PDHC',
         'description': (
-            'Unified service for patient lifecycle, CarePlan readout/parse/export, '
-            'CarePlan dispatch, FHIR R5 ServiceRequest workflow operations, '
-            'and Questionnaire/Form distribution to external rendering services.'
+            'Dispatch service for the PDHC platform. Handles patient CarePlan '
+            'CRUD (#310), PlanDefinition dispatch to caregivers (HMAC-signed '
+            'webhook with idempotency + DLQ + PDL consent gate), FHIR R5 '
+            'ServiceRequest workflow, and Questionnaire/Form distribution to '
+            'external rendering services. Not an alerting engine — threshold '
+            'evaluation and DetectedIssue/Flag emission are out of scope by '
+            'design (see docs/decisions/ADR-001-alerting-scope.md).'
         ),
         'kind': 'instance',
         'fhirVersion': '5.0.0',
@@ -57,25 +74,34 @@ def capability_statement():
                     ],
                 },
                 {
+                    # #310 shipped the real patient-CarePlan API at
+                    # /api/v1/careplans (lowercase). The pre-#310
+                    # CarePlan block advertised a proxy to plan.pdhc's
+                    # PlanDefinition (the wire-alias-era misnomer),
+                    # deleted in #320. Post-#320 + #348 the block
+                    # advertises the actual CRUD + custom `context`
+                    # operation. See docs/decisions/ADR-001 for scope.
                     'type': 'CarePlan',
                     'profile': 'http://hl7.org/fhir/StructureDefinition/CarePlan',
                     'interaction': [
+                        {'code': 'create'},
                         {'code': 'read'},
+                        {'code': 'update'},
                         {'code': 'search-type'},
                     ],
                     'searchParam': [
-                        {'name': 'subject', 'type': 'reference'},
+                        {'name': 'patient_guid', 'type': 'reference'},
                         {'name': 'status', 'type': 'token'},
-                        {'name': '_count', 'type': 'number'},
                     ],
                     'operation': [
                         {
-                            'name': 'dispatch',
-                            'definition': 'POST /api/v1/CarePlan/{id}/dispatch',
-                        },
-                        {
-                            'name': 'export-csv',
-                            'definition': 'POST /api/v1/CarePlan/{id}/export/csv',
+                            'name': 'context',
+                            'definition': 'GET /api/v1/careplans/{guid}/context',
+                            'documentation': (
+                                'Return the CarePlan alongside its resolved '
+                                'PlanDefinition snapshot (concepts, '
+                                'transactions, goals, timing). Read-only.'
+                            ),
                         },
                     ],
                 },

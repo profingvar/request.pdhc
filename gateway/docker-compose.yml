@@ -4,12 +4,18 @@ services:
   db:
     image: postgres:16-alpine
     container_name: request_pdhc_db
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-request_admin}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-request_dev_2026!}
+      # No insecure default — POSTGRES_PASSWORD MUST be set in .env
+      # (ticket #369, rollup #348). Combined with the loopback port
+      # binds below, this prevents an unauthenticated LAN reach.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       POSTGRES_DB: ${POSTGRES_DB:-request_pdhc}
     ports:
-      - "9061:5432"
+      # Loopback-only — matches every other pdhc service post-#169
+      # (memory project_containerise_baremetal_optionC).
+      - "127.0.0.1:9061:5432"
     volumes:
       - request_pdhc_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -23,16 +29,19 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: request_pdhc_app
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-request_admin}:${POSTGRES_PASSWORD:-request_dev_2026!}@db:5432/${POSTGRES_DB:-request_pdhc}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-request_admin}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db:5432/${POSTGRES_DB:-request_pdhc}
       FLASK_PORT: "9060"
     ports:
-      - "9060:9060"
+      # Loopback-only. External traffic arrives via nginx
+      # (request.pdhc.se → 127.0.0.1:9060). CLAUDE.md §3.
+      - "127.0.0.1:9060:9060"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9060/api/health"]
       interval: 10s
@@ -57,7 +66,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-request_admin}:${POSTGRES_PASSWORD:-request_dev_2026!}@db:5432/${POSTGRES_DB:-request_pdhc}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-request_admin}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db:5432/${POSTGRES_DB:-request_pdhc}
       FLASK_APP: wsgi:application
     # Override entrypoint.sh — the worker doesn't need to run
     # migrations (the app container does), and shouldn't bind any
