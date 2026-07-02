@@ -41,6 +41,31 @@ def _database(app):
 
 
 @pytest.fixture(autouse=True)
+def _pin_auth_disabled(app):
+    """Ticket #380 (rollup #348) — reset app.config['AUTH_DISABLED']
+    to True before every test.
+
+    Sibling test modules (test_dispatch_trigger, test_provider_lifecycle,
+    test_sandbox_dispatch, test_webhook_dispatcher) historically set
+    os.environ['AUTH_DISABLED'] = 'false' at import time to exercise
+    real auth paths. Pytest imports all test modules during collection
+    (regardless of run order), so those import-time env writes could
+    leak into every subsequent test — the app fixture is session-scoped
+    and its config was read once from the polluted env.
+
+    This autouse fixture pins app.config['AUTH_DISABLED']=True before
+    each test runs, so the polluters' import-time env writes no longer
+    affect anyone. Tests that specifically need auth ON monkeypatch
+    or set app.config['AUTH_DISABLED']=False themselves (see
+    test_service_request_create_authz.py for the precedent).
+    """
+    prev = app.config.get('AUTH_DISABLED')
+    app.config['AUTH_DISABLED'] = True
+    yield
+    app.config['AUTH_DISABLED'] = prev
+
+
+@pytest.fixture(autouse=True)
 def db_session(app, _database):
     """Provide a clean session for each test."""
     with app.app_context():

@@ -355,23 +355,20 @@ class TestDispatchConsentGate:
 class TestRoutePlumbing:
     def test_bad_payload_concept_guids_shape_is_400(self, client):
         """The route's own validation rejects payload_concept_guids
-        when it's not a list. Skipped when the session has been
-        polluted by test_dispatch_trigger.py mutating AUTH_DISABLED
-        at module load — in that mode the auth middleware fires
-        before the validator and the test exercises a different
-        layer than intended."""
+        when it's not a list.
+
+        Ticket #380 (rollup #348) — URL updated from
+        `/api/v1/CarePlan/<g>/dispatch` (deleted in #368 commit-1)
+        to the canonical `/api/v1/PlanDefinition/<g>/dispatch`. The
+        conftest now pins AUTH_DISABLED=True per-test so the
+        pytest.skip flake-shim from the earlier polluted-env era is
+        removed."""
         r = client.post(
-            "/api/v1/CarePlan/cp-route/dispatch",
+            "/api/v1/PlanDefinition/cp-route/dispatch",
             json={
                 "provider_guid": "prov-1",
                 "payload_concept_guids": "concept-x",  # string, not list
             },
         )
-        if r.status_code == 401:
-            pytest.skip(
-                "AUTH_DISABLED flipped by sibling test "
-                "(test_dispatch_trigger); route-layer validation "
-                "still works in isolated runs.",
-            )
         assert r.status_code == 400
         assert "payload_concept_guids" in r.get_json()["message"]

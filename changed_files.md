@@ -377,6 +377,41 @@ All edited files are noted here with full path, per Rule 17.
     run and diff-checked against what the current code emits. Serves
     as a byte-for-byte drift signal at review time.
 
+## 2026-07-02 — rollup #348 close-out (#380 SSO fixture + #365 reconcile + #381 super)
+
+  - #380 gateway/tests/conftest.py (MODIFIED): added an autouse
+    session-scoped fixture `_pin_auth_disabled` that resets
+    `app.config['AUTH_DISABLED'] = True` before every test. Belt-
+    and-braces defence against sibling tests' import-time env writes.
+  - #380 gateway/tests/test_dispatch_trigger.py (MODIFIED): every
+    module-level `os.environ['X'] = 'Y'` converted to
+    `os.environ.setdefault(...)`. conftest's canonical test env now
+    always wins.
+  - #380 gateway/tests/test_provider_lifecycle.py (MODIFIED): same
+    setdefault sweep.
+  - #380 gateway/tests/test_sandbox_dispatch.py (MODIFIED): same.
+  - #380 gateway/tests/test_webhook_dispatcher.py (MODIFIED): same.
+  - #380 gateway/tests/test_internal_api.py (MODIFIED): `_create_sr`
+    now seeds `plan_definition_snapshot` in the shape the current
+    `context_service._extract_transactions` reads (goals[] +
+    activities[].transactions[]). Previously seeded transactions
+    inside `fhir_resource.contained[0]._pdhc_transactions` — a stale
+    shape from before the context service was refactored. This was
+    the last remaining real bug behind the 52 pre-existing failures.
+  - #380 gateway/tests/test_consent_at_dispatch.py (MODIFIED):
+    `TestRoutePlumbing::test_bad_payload_concept_guids_shape_is_400`
+    URL corrected from the deleted `/api/v1/CarePlan/<g>/dispatch`
+    (dropped in #368 commit-1) to the canonical
+    `/api/v1/PlanDefinition/<g>/dispatch`. The AUTH_DISABLED
+    pytest.skip flake-shim removed — no longer needed now that
+    conftest pins per-test.
+  - #380 .github/workflows/test.yml (MODIFIED): removed the whole
+    7-file `--ignore` list + the 1-test `--deselect`. CI now runs
+    the entire pytest suite. Header comment documents #380 closeout.
+  - Result: full pytest 160/160 pass (vs. commit-2 baseline of
+    102/102 with 7 files ignored + 51 pre-existing 401 failures
+    on the un-ignored subset).
+
 ## 2026-07-01 — rollup #348 commit-2 (#372 truth test + #376 CI)
 
   - #376 .github/workflows/test.yml (NEW): first CI for request.pdhc.

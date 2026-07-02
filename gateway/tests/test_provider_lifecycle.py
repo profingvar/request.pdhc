@@ -8,16 +8,18 @@ import os
 import sys
 from datetime import datetime, timezone, timedelta
 
-# Set env BEFORE importing app modules — must happen before pytest
-# imports the package conftest (which would override these).
-os.environ['AUTH_DISABLED'] = 'false'
-os.environ['FLASK_ENV'] = 'development'
-os.environ['DATABASE_URL'] = 'sqlite:///:memory:'
-os.environ['HMAC_SECRET'] = 'test-hmac-secret-min-32-chars-for-test'
-os.environ['INTERNAL_SERVICE_KEY'] = 'test-internal-key'
-os.environ['FLASK_SECRET_KEY'] = 'test-flask-secret'
-os.environ['JWT_SECRET_KEY'] = 'test-jwt-secret'
-os.environ['PAT_DEPRECATED_GRACE_DAYS'] = '14'
+# Ticket #380 (rollup #348) — every env write here is `setdefault` so
+# conftest.py's canonical test env wins when pytest imports this
+# module during collection. Previously these were brute overrides
+# that polluted the session-scoped app fixture's config.
+os.environ.setdefault('AUTH_DISABLED', 'false')
+os.environ.setdefault('FLASK_ENV', 'development')
+os.environ.setdefault('DATABASE_URL', 'sqlite:///:memory:')
+os.environ.setdefault('HMAC_SECRET', 'test-hmac-secret-min-32-chars-for-test')
+os.environ.setdefault('INTERNAL_SERVICE_KEY', 'test-internal-key')
+os.environ.setdefault('FLASK_SECRET_KEY', 'test-flask-secret')
+os.environ.setdefault('JWT_SECRET_KEY', 'test-jwt-secret')
+os.environ.setdefault('PAT_DEPRECATED_GRACE_DAYS', '14')
 
 # Generate a Fernet key for tests
 from cryptography.fernet import Fernet  # noqa: E402

@@ -15,7 +15,12 @@ def svc_headers():
 
 
 def _create_sr(app):
-    """Create a ServiceRequest with a contained CarePlan + transactions."""
+    """Create a ServiceRequest with a plan_definition_snapshot +
+    transactions. Ticket #380 (rollup #348) — refreshed to match the
+    shape context_service.get_sr_context now reads from. Previously
+    the test seeded transactions inside fhir_resource.contained[0]
+    ._pdhc_transactions; the service reads from
+    plan_definition_snapshot.activities[i].transactions[j]."""
     from app import db
     from app.models.service_request_models import ServiceRequest
 
@@ -23,6 +28,7 @@ def _create_sr(app):
     patient_guid = str(uuid.uuid4())
     concept_a = str(uuid.uuid4())
     tx_a = str(uuid.uuid4())
+    goal_guid = str(uuid.uuid4())
 
     sr = ServiceRequest(
         guid=sr_guid,
@@ -34,25 +40,32 @@ def _create_sr(app):
         requester_org_guid=str(uuid.uuid4()),
         requester_org_name='Test Org',
         contract_guid=str(uuid.uuid4()),
+        plan_definition_snapshot={
+            'goals': [{
+                'guid': goal_guid,
+                'concept_guid': concept_a,
+                'concept_name': 'Spirometri',
+            }],
+            'activities': [{
+                'goal_guid': goal_guid,
+                'goal_concept_guid': concept_a,
+                'goal_concept_name': 'Spirometri',
+                'transactions': [{
+                    'guid': tx_a,
+                    'concept_guid': concept_a,
+                    'concept_name': 'Spirometri',
+                    'unit': 'percent',
+                    'unit_display': '% predicted',
+                    'expected_value': '80',
+                    'range_min': 70.0,
+                    'range_max': 120.0,
+                    'requirement_type': 'required',
+                }],
+            }],
+        },
         fhir_resource={
             'resourceType': 'ServiceRequest',
             'contained': [
-                {
-                    'resourceType': 'CarePlan',
-                    '_pdhc_transactions': [
-                        {
-                            'transaction_guid': tx_a,
-                            'concept_guid': concept_a,
-                            'concept_name': 'Spirometri',
-                            'unit': 'percent',
-                            'unit_display': '% predicted',
-                            'expected_value': '80',
-                            'range_min': 70.0,
-                            'range_max': 120.0,
-                            'requirement_type': 'required',
-                        }
-                    ],
-                },
                 {
                     'resourceType': 'Goal',
                     'description': {

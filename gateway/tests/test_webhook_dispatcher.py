@@ -5,18 +5,20 @@ import json
 import os
 from datetime import datetime, timezone, timedelta
 
-# Env setup MUST run before any app import or config load. Mirror the
-# test_provider_lifecycle.py preamble — pytest loads test modules
-# *during* collection, and an env value set at module top wins over
-# the package conftest's per-fixture state. (We've verified empirically
-# that this preamble keeps config.py's AUTH_DISABLED guard happy.)
-os.environ['AUTH_DISABLED'] = 'false'
-os.environ['FLASK_ENV'] = 'development'
-os.environ['DATABASE_URL'] = 'sqlite:///:memory:'
-os.environ['HMAC_SECRET'] = 'test-hmac-secret-min-32-chars-for-test'
-os.environ['INTERNAL_SERVICE_KEY'] = 'test-internal-key'
-os.environ['FLASK_SECRET_KEY'] = 'test-flask-secret'
-os.environ['JWT_SECRET_KEY'] = 'test-jwt-secret'
+# Ticket #380 (rollup #348) — every env write here is `setdefault` so
+# conftest.py's canonical test env wins when pytest imports this
+# module during collection. Previously these were brute overrides
+# that polluted the session-scoped app fixture's config: sibling
+# tests (test_internal_api, test_care_plans, ...) run after this
+# module is imported and saw the wrong INTERNAL_SERVICE_KEY /
+# AUTH_DISABLED values.
+os.environ.setdefault('AUTH_DISABLED', 'false')
+os.environ.setdefault('FLASK_ENV', 'development')
+os.environ.setdefault('DATABASE_URL', 'sqlite:///:memory:')
+os.environ.setdefault('HMAC_SECRET', 'test-hmac-secret-min-32-chars-for-test')
+os.environ.setdefault('INTERNAL_SERVICE_KEY', 'test-internal-key')
+os.environ.setdefault('FLASK_SECRET_KEY', 'test-flask-secret')
+os.environ.setdefault('JWT_SECRET_KEY', 'test-jwt-secret')
 
 from cryptography.fernet import Fernet  # noqa: E402
 os.environ.setdefault('WEBHOOK_SECRETS_KEY', Fernet.generate_key().decode())
