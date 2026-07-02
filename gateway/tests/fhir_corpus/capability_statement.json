@@ -1,0 +1,259 @@
+{
+  "date": "2026-07-02T07:11:38Z",
+  "description": "Dispatch service for the PDHC platform. Handles patient CarePlan CRUD (#310), PlanDefinition dispatch to caregivers (HMAC-signed webhook with idempotency + DLQ + PDL consent gate), FHIR R5 ServiceRequest workflow, and Questionnaire/Form distribution to external rendering services. Not an alerting engine — threshold evaluation and DetectedIssue/Flag emission are out of scope by design (see docs/decisions/ADR-001-alerting-scope.md).",
+  "fhirVersion": "5.0.0",
+  "format": [
+    "json"
+  ],
+  "id": "request-pdhc",
+  "implementation": {
+    "description": "request.pdhc production instance",
+    "url": "https://request.pdhc.se/api/v1"
+  },
+  "kind": "instance",
+  "name": "RequestPDHCCapabilityStatement",
+  "publisher": "PDHC",
+  "resourceType": "CapabilityStatement",
+  "rest": [
+    {
+      "mode": "server",
+      "operation": [
+        {
+          "definition": "https://request.pdhc.se/api/v1/OperationDefinition/request-feed",
+          "documentation": "GET /api/v1/requests?provider_guid={guid}&since={iso-datetime} — Provider subscription feed. Returns dispatched requests filtered by provider_guid with cursor-based pagination. Supports X-API-Key authentication for service-to-service calls.",
+          "name": "request-feed"
+        },
+        {
+          "definition": "https://request.pdhc.se/api/v1/OperationDefinition/request-status-update",
+          "documentation": "PUT /api/v1/requests/{request_guid}/status — Provider status callback. Allows provider portals to report acknowledged/in_progress/completed/rejected status back.",
+          "name": "request-status-update"
+        }
+      ],
+      "resource": [
+        {
+          "interaction": [
+            {
+              "code": "read"
+            },
+            {
+              "code": "search-type"
+            },
+            {
+              "code": "create"
+            },
+            {
+              "code": "update"
+            },
+            {
+              "code": "delete"
+            }
+          ],
+          "profile": "http://hl7.org/fhir/StructureDefinition/Patient",
+          "searchParam": [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "gender",
+              "type": "token"
+            },
+            {
+              "name": "birthdate",
+              "type": "date"
+            },
+            {
+              "name": "_count",
+              "type": "number"
+            },
+            {
+              "name": "_offset",
+              "type": "number"
+            }
+          ],
+          "type": "Patient"
+        },
+        {
+          "interaction": [
+            {
+              "code": "create"
+            },
+            {
+              "code": "read"
+            },
+            {
+              "code": "update"
+            },
+            {
+              "code": "search-type"
+            }
+          ],
+          "operation": [
+            {
+              "definition": "https://request.pdhc.se/api/v1/OperationDefinition/CarePlan-context",
+              "documentation": "GET /api/v1/careplans/{guid}/context — Return the CarePlan alongside its resolved PlanDefinition snapshot (concepts, transactions, goals, timing). Read-only.",
+              "name": "CarePlan-context"
+            }
+          ],
+          "profile": "http://hl7.org/fhir/StructureDefinition/CarePlan",
+          "searchParam": [
+            {
+              "name": "patient_guid",
+              "type": "reference"
+            },
+            {
+              "name": "status",
+              "type": "token"
+            }
+          ],
+          "type": "CarePlan"
+        },
+        {
+          "interaction": [
+            {
+              "code": "read"
+            },
+            {
+              "code": "search-type"
+            },
+            {
+              "code": "create"
+            }
+          ],
+          "operation": [
+            {
+              "definition": "https://request.pdhc.se/api/v1/OperationDefinition/ServiceRequest-update-snapshot",
+              "documentation": "PUT /api/v1/ServiceRequest/{id}/snapshot — Update the editable PlanDefinition snapshot (draft only).",
+              "name": "ServiceRequest-update-snapshot"
+            },
+            {
+              "definition": "https://request.pdhc.se/api/v1/OperationDefinition/ServiceRequest-finalize",
+              "documentation": "POST /api/v1/ServiceRequest/{id}/finalize — Finalize draft: snapshot attached forms (Questionnaire + render-ready), build FHIR R5 ServiceRequest with contained CarePlan and Questionnaires, set status to active.",
+              "name": "ServiceRequest-finalize"
+            },
+            {
+              "definition": "https://request.pdhc.se/api/v1/OperationDefinition/ServiceRequest-archive",
+              "documentation": "POST /api/v1/ServiceRequest/{id}/archive — Archive a ServiceRequest.",
+              "name": "ServiceRequest-archive"
+            },
+            {
+              "definition": "https://request.pdhc.se/api/v1/OperationDefinition/ServiceRequest-revoke",
+              "documentation": "POST /api/v1/ServiceRequest/{id}/revoke — Cancel a ServiceRequest. Only if no matches are accepted.",
+              "name": "ServiceRequest-revoke"
+            },
+            {
+              "definition": "https://request.pdhc.se/api/v1/OperationDefinition/ServiceRequest-match",
+              "documentation": "POST /api/v1/ServiceRequest/{id}/match — Find matching contracts from contract.pdhc.",
+              "name": "ServiceRequest-match"
+            },
+            {
+              "definition": "https://request.pdhc.se/api/v1/OperationDefinition/ServiceRequest-push",
+              "documentation": "POST /api/v1/ServiceRequest/{id}/push — Push to all pending matched providers. Bundle includes FHIR ServiceRequest with contained Questionnaires plus render-ready Binary entries for each form.",
+              "name": "ServiceRequest-push"
+            },
+            {
+              "definition": "https://request.pdhc.se/api/v1/OperationDefinition/ServiceRequest-push-one",
+              "documentation": "POST /api/v1/ServiceRequest/{id}/push/{match_guid} — Push to a single matched provider.",
+              "name": "ServiceRequest-push-one"
+            },
+            {
+              "definition": "https://request.pdhc.se/api/v1/OperationDefinition/ServiceRequest-list-forms",
+              "documentation": "GET /api/v1/ServiceRequest/{id}/forms — List all forms attached to a ServiceRequest.",
+              "name": "ServiceRequest-list-forms"
+            },
+            {
+              "definition": "https://request.pdhc.se/api/v1/OperationDefinition/ServiceRequest-add-form",
+              "documentation": "POST /api/v1/ServiceRequest/{id}/forms — Attach a form (by form_guid) to a draft ServiceRequest. The form Questionnaire and render-ready JSON are snapshotted on finalize.",
+              "name": "ServiceRequest-add-form"
+            },
+            {
+              "definition": "https://request.pdhc.se/api/v1/OperationDefinition/ServiceRequest-remove-form",
+              "documentation": "DELETE /api/v1/ServiceRequest/{id}/forms/{form_attachment_guid} — Remove an attached form from a draft ServiceRequest.",
+              "name": "ServiceRequest-remove-form"
+            },
+            {
+              "definition": "https://request.pdhc.se/api/v1/OperationDefinition/ServiceRequest-reorder-forms",
+              "documentation": "POST /api/v1/ServiceRequest/{id}/forms/reorder — Bulk reorder attached forms (draft only). Body: {ordered_guids: [...]}.",
+              "name": "ServiceRequest-reorder-forms"
+            },
+            {
+              "definition": "https://request.pdhc.se/api/v1/OperationDefinition/ServiceRequest-provider-respond",
+              "documentation": "POST /api/v1/ServiceRequest/receipt/{token}/respond — Provider webhook: accept/reject via receipt token (no auth).",
+              "name": "ServiceRequest-provider-respond"
+            }
+          ],
+          "profile": "http://hl7.org/fhir/StructureDefinition/ServiceRequest",
+          "searchParam": [
+            {
+              "name": "status",
+              "type": "token"
+            },
+            {
+              "name": "page",
+              "type": "number"
+            },
+            {
+              "name": "per_page",
+              "type": "number"
+            }
+          ],
+          "type": "ServiceRequest"
+        },
+        {
+          "documentation": "Questionnaire resources are proxied from the Plan service (plan.pdhc.se) form catalogue. Forms are attached to ServiceRequests and their FHIR Questionnaire + render-ready JSON are frozen at finalize time. Contained Questionnaires are delivered inside the push bundle.",
+          "interaction": [
+            {
+              "code": "read"
+            },
+            {
+              "code": "search-type"
+            }
+          ],
+          "operation": [
+            {
+              "definition": "https://request.pdhc.se/api/v1/OperationDefinition/Form-catalogue",
+              "documentation": "GET /api/v1/Form — List available forms from plan.pdhc.se catalogue (proxy).",
+              "name": "Form-catalogue"
+            },
+            {
+              "definition": "https://request.pdhc.se/api/v1/OperationDefinition/Form-detail",
+              "documentation": "GET /api/v1/Form/{form_guid} — Get a single form definition from plan.pdhc.se (proxy).",
+              "name": "Form-detail"
+            }
+          ],
+          "profile": "http://hl7.org/fhir/StructureDefinition/Questionnaire",
+          "searchParam": [
+            {
+              "name": "page",
+              "type": "number"
+            },
+            {
+              "name": "per_page",
+              "type": "number"
+            }
+          ],
+          "type": "Questionnaire"
+        }
+      ],
+      "security": {
+        "description": "Authentication via SSO (sso.pdhc.se). Supports session, Bearer token, and X-API-Key (service-to-service).",
+        "service": [
+          {
+            "coding": [
+              {
+                "code": "OAuth",
+                "display": "OAuth",
+                "system": "http://hl7.org/fhir/restful-security-service"
+              }
+            ],
+            "text": "SSO/OAuth token-based authentication"
+          }
+        ]
+      }
+    }
+  ],
+  "status": "active",
+  "title": "request.pdhc Unified Service",
+  "url": "https://request.pdhc.se/api/v1/metadata",
+  "version": "2.0.0"
+}

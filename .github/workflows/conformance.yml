@@ -1,0 +1,141 @@
+name: FHIR R5 conformance
+
+# Ticket #377 (rollup #348) — gate PRs on canonical HL7 FHIR R5
+# conformance of the surface request.pdhc actually advertises per
+# ADR-001 (docs/decisions/ADR-001-alerting-scope.md) and the #373
+# CapabilityStatement rewrite:
+#
+#   - CapabilityStatement itself (GET /api/v1/metadata)
+#   - ServiceRequest envelope with contained CarePlan + Goals + Patient
+#     excerpt + Questionnaires (assembled by
+#     app/services/fhir_builder_service.py:build_service_request_resource
+#     — the code path that ships on finalize/push)
+#   - standalone CarePlan (extracted from the envelope for a focused
+#     validator error message on CarePlan-shape drift)
+#
+# What is deliberately NOT gated: DetectedIssue / Flag / Observation.
+# Per ADR-001 request.pdhc is not an alerting engine. If those
+# resources ever come into scope, add them to the corpus emitter and
+# extend the `paths:` filter below.
+#
+# The pytest workflow (test.yml, #376) covers the app-level tests;
+# this workflow covers the slow / canonical layer: the official HL7
+# validator_cli.jar against the emitted corpus.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'gateway/app/api/capability.py'
+      - 'gateway/app/api/care_plans.py'
+      - 'gateway/app/api/service_requests.py'
+      - 'gateway/app/api/dispatch.py'
+      - 'gateway/app/services/fhir_builder_service.py'
+      - 'gateway/app/models/**'
+      - 'gateway/tests/conformance_corpus_emit.py'
+      - 'gateway/requirements.txt'
+      - 'gateway/Makefile'
+      - '.github/workflows/conformance.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'gateway/app/api/capability.py'
+      - 'gateway/app/api/care_plans.py'
+      - 'gateway/app/api/service_requests.py'
+      - 'gateway/app/api/dispatch.py'
+      - 'gateway/app/services/fhir_builder_service.py'
+      - 'gateway/app/models/**'
+      - 'gateway/tests/conformance_corpus_emit.py'
+      - 'gateway/requirements.txt'
+      - 'gateway/Makefile'
+      - '.github/workflows/conformance.yml'
+  workflow_dispatch: {}
+
+env:
+  # Pin the validator version so CI is reproducible. Matches termbank
+  # and plan.pdhc. Bump only after `make conformance` succeeds locally
+  # with the new jar.
+  VALIDATOR_VERSION: '6.9.10'
+  FHIR_VERSION: '5.0.0'
+  TX_SERVER: 'https://tx.fhir.org/r5'
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    # Local run against tx.fhir.org takes ~5-8 min for 3 resources.
+    # 20 minutes gives generous headroom for cold cache + tx latency.
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          # 3.12 matches the Dockerfile base image (python:3.12-slim).
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: gateway/requirements.txt
+
+      - name: Cache validator_cli.jar
+        id: cache-jar
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/fhir/validator_cli.jar
+          key: fhir-validator-${{ env.VALIDATOR_VERSION }}
+
+      - name: Download validator_cli.jar (on cache miss)
+        if: steps.cache-jar.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/.local/share/fhir
+          curl -sSL \
+            -o ~/.local/share/fhir/validator_cli.jar \
+            'https://github.com/hapifhir/org.hl7.fhir.core/releases/download/${{ env.VALIDATOR_VERSION }}/validator_cli.jar'
+          ls -lh ~/.local/share/fhir/validator_cli.jar
+
+      - name: Install Python deps
+        working-directory: gateway
+        run: |
+          python -m venv venv
+          . venv/bin/activate
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Emit corpus
+        working-directory: gateway
+        env:
+          # Corpus emit boots a self-contained SQLite Flask app; these
+          # env vars satisfy config.py guards without touching real
+          # secrets. AUTH_DISABLED=true is safe here — emit runs
+          # offline and does not expose any endpoint.
+          DATABASE_URL: 'sqlite:///corpus_emit.db'
+          FLASK_ENV: 'development'
+          AUTH_DISABLED: 'true'
+          FLASK_SECRET_KEY: 'ci-only-not-secret'
+          JWT_SECRET_KEY: 'ci-only-jwt'
+          HMAC_SECRET: 'ci-only-hmac-secret-minimum-32-chars-ok'
+          INTERNAL_SERVICE_KEY: 'ci-only-internal-key'
+        run: make corpus
+
+      - name: Run HL7 R5 conformance validator
+        working-directory: gateway
+        run: |
+          # Makefile defaults VALIDATOR_JAR to $(HOME)/.local/share/fhir/
+          # validator_cli.jar; that path is already populated by the
+          # cache / download step above.
+          make conformance
+
+      - name: Upload corpus artifact (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fhir-corpus
+          path: gateway/tests/fhir_corpus/
+          retention-days: 7

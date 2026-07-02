@@ -21,21 +21,31 @@ This module replaces that check. Two directions:
       not FHIR-shaped; enumerating an allowlist is bigger scope than
       this ticket. Filed as a follow-up under rollup #348.
 
-The extraction here reads `resource[].operation[].definition` AND
-`rest.operation[].definition` — the two places capability.py declares
-operations with a literal "METHOD /path" URL pattern. It does NOT
-try to infer paths from generic FHIR REST interactions
-(`create`/`read`/`update`/`search-type`) because request.pdhc mixes
-case (CarePlan resource type → routes at /careplans lowercase), and
-guessing the URL from the resource `type` field would produce false
-mismatches. Operations, by contrast, have unambiguous inline URLs.
+The extraction reads the FIRST line of `operation.documentation`
+(the "METHOD /path — description" convention introduced in #377 when
+the CapabilityStatement was made FHIR-R5-conformant — `definition`
+must be a canonical URL per the spec, so the raw endpoint moved into
+documentation). Both places capability.py declares operations —
+`rest.resource[].operation[]` and `rest.operation[]` — use the same
+convention.
+
+The extraction does NOT try to infer paths from generic FHIR REST
+interactions (`create`/`read`/`update`/`search-type`) because
+request.pdhc mixes case (CarePlan resource type → routes at
+/careplans lowercase), and guessing the URL from the resource `type`
+field would produce false mismatches. Operations, by contrast, have
+an unambiguous inline URL on the first line of documentation.
 """
 from __future__ import annotations
 
 import re
 
 
-_DEF_RE = re.compile(r"^(GET|POST|PUT|DELETE|PATCH)\s+(/\S+)$")
+# The first line of an operation's documentation is required to be
+# "METHOD /path" (optionally followed by " — description"). We anchor
+# to the start-of-string; anything after the path (including a
+# " — description" tail) is trimmed by splitting on the first space.
+_DEF_RE = re.compile(r"^(GET|POST|PUT|DELETE|PATCH)\s+(/\S+)")
 
 
 def _shape(path: str) -> str:
@@ -48,17 +58,21 @@ def _shape(path: str) -> str:
     return p
 
 
-def _parse_op_definition(defn: str) -> tuple[str, str] | None:
-    """Parse `'POST /api/v1/CarePlan/{id}/dispatch'` into
-    `('POST', '/api/v1/CarePlan/<*>/dispatch')`. Returns None if the
-    string doesn't fit `METHOD /path` shape (e.g. a bare URL or
-    a mention like `search parameter`).
+def _parse_op_first_line(text: str) -> tuple[str, str] | None:
+    """Parse the FIRST line of an operation's `documentation` field.
 
-    Query strings on definition are stripped — Flask's url_map has
+    Convention: `'POST /api/v1/CarePlan/{id}/dispatch — free text'`
+    → `('POST', '/api/v1/CarePlan/<*>/dispatch')`. Returns None if
+    the first line doesn't start with `METHOD /path`.
+
+    Query strings on the path are stripped — Flask's url_map has
     path patterns only, and documenting `?provider_guid=…&since=…`
     on the capability side is legitimate (helps clients).
     """
-    m = _DEF_RE.match(defn.strip())
+    if not text:
+        return None
+    first_line = text.strip().splitlines()[0].strip()
+    m = _DEF_RE.match(first_line)
     if not m:
         return None
     method = m.group(1)
@@ -79,12 +93,12 @@ def _advertised_operations(client) -> set[tuple[str, str]]:
 
     for res in rest.get("resource", []):
         for op in res.get("operation", []) or []:
-            parsed = _parse_op_definition(op.get("definition", ""))
+            parsed = _parse_op_first_line(op.get("documentation", ""))
             if parsed:
                 out.add(parsed)
 
     for op in rest.get("operation", []) or []:
-        parsed = _parse_op_definition(op.get("definition", ""))
+        parsed = _parse_op_first_line(op.get("documentation", ""))
         if parsed:
             out.add(parsed)
 
@@ -104,6 +118,23 @@ def _url_map_shapes(app) -> set[tuple[str, str]]:
 
 class TestCapabilityTruth:
     """Direction (a) — every advertised operation is a real route."""
+
+    def test_first_line_regex_matches(self):
+        """Sanity — the METHOD/path regex still parses the shape
+        `POST /api/v1/foo — description` correctly."""
+        assert _parse_op_first_line("POST /api/v1/foo — bar baz") == (
+            "POST", "/api/v1/foo"
+        )
+        assert _parse_op_first_line("GET /api/v1/x/<*>/y") == (
+            "GET", "/api/v1/x/<*>/y"
+        )
+        # Query strings stripped.
+        assert _parse_op_first_line("GET /api/v1/x?a=<*>") == (
+            "GET", "/api/v1/x"
+        )
+        assert _parse_op_first_line("not a documented endpoint") is None
+        assert _parse_op_first_line("") is None
+        assert _parse_op_first_line(None) is None
 
     def test_metadata_endpoint_is_reachable(self, client):
         """Sanity — /api/v1/metadata must respond 200 so the

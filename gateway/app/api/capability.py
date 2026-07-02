@@ -17,6 +17,38 @@ _CAPABILITYSTATEMENT_DATE = datetime.fromtimestamp(
 ).strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
+# Canonical URL scheme for operation definitions (ticket #377).
+# CapabilityStatement.rest[.resource].operation.definition is
+# constrained by FHIR R5 to be a canonical URL, not a shape like
+# "POST /api/v1/…" (validator_cli 6.9.10 flags whitespace and the
+# missing scheme). We publish canonical URLs under this base without
+# committing to serving OperationDefinition resources at those URLs —
+# the definitions are self-descriptive via `documentation`, and the
+# canonical URL merely identifies the operation stably. See the
+# rollup #348 conformance workflow (.github/workflows/conformance.yml).
+#
+# The `documentation` field carries the concrete "METHOD /path" line
+# as its FIRST line, followed by prose. Test #372 truth test parses
+# that first line to check every advertised operation resolves in
+# app.url_map — so keep the "METHOD /path" prefix EXACTLY.
+_OP_CANON = 'https://request.pdhc.se/api/v1/OperationDefinition/'
+
+
+def _op(name, method_path, documentation):
+    """Build a spec-conformant CapabilityStatement operation entry.
+
+    The concrete REST endpoint lives on the first line of
+    documentation ("METHOD /path — description"); the `definition`
+    field is a canonical URL so validator_cli accepts it.
+    """
+    doc = f'{method_path} — {documentation}' if documentation else method_path
+    return {
+        'name': name,
+        'definition': f'{_OP_CANON}{name}',
+        'documentation': doc,
+    }
+
+
 @capability_bp.route('/metadata', methods=['GET'])
 def capability_statement():
     """Return FHIR R5 CapabilityStatement for this service."""
@@ -40,6 +72,12 @@ def capability_statement():
             'design (see docs/decisions/ADR-001-alerting-scope.md).'
         ),
         'kind': 'instance',
+        # cpb-14: kind=instance requires `implementation`. Added in #377
+        # as part of the conformance CI landing.
+        'implementation': {
+            'description': 'request.pdhc production instance',
+            'url': 'https://request.pdhc.se/api/v1',
+        },
         'fhirVersion': '5.0.0',
         'format': ['json'],
         'rest': [{
@@ -47,10 +85,15 @@ def capability_statement():
             'security': {
                 'service': [{
                     'coding': [{
-                        'system': 'http://terminology.hl7.org/CodeSystem/restful-security-service',
+                        # R5 CodeSystem URL for Restful Security Service.
+                        # The display value is constrained by the code
+                        # system to the literal 'OAuth' (validator #377
+                        # flags a Wrong-Display-Name error otherwise).
+                        'system': 'http://hl7.org/fhir/restful-security-service',
                         'code': 'OAuth',
-                        'display': 'SSO/OAuth token-based authentication',
-                    }]
+                        'display': 'OAuth',
+                    }],
+                    'text': 'SSO/OAuth token-based authentication',
                 }],
                 'description': 'Authentication via SSO (sso.pdhc.se). Supports session, Bearer token, and X-API-Key (service-to-service).',
             },
@@ -94,15 +137,15 @@ def capability_statement():
                         {'name': 'status', 'type': 'token'},
                     ],
                     'operation': [
-                        {
-                            'name': 'context',
-                            'definition': 'GET /api/v1/careplans/{guid}/context',
-                            'documentation': (
+                        _op(
+                            'CarePlan-context',
+                            'GET /api/v1/careplans/{guid}/context',
+                            (
                                 'Return the CarePlan alongside its resolved '
                                 'PlanDefinition snapshot (concepts, '
                                 'transactions, goals, timing). Read-only.'
                             ),
-                        },
+                        ),
                     ],
                 },
                 {
@@ -119,75 +162,76 @@ def capability_statement():
                         {'name': 'per_page', 'type': 'number'},
                     ],
                     'operation': [
-                        {
-                            'name': 'update-snapshot',
-                            'definition': 'PUT /api/v1/ServiceRequest/{id}/snapshot',
-                            'documentation': 'Update the editable PlanDefinition snapshot (draft only).',
-                        },
-                        {
-                            'name': 'finalize',
-                            'definition': 'POST /api/v1/ServiceRequest/{id}/finalize',
-                            'documentation': (
+                        _op(
+                            'ServiceRequest-update-snapshot',
+                            'PUT /api/v1/ServiceRequest/{id}/snapshot',
+                            'Update the editable PlanDefinition snapshot (draft only).',
+                        ),
+                        _op(
+                            'ServiceRequest-finalize',
+                            'POST /api/v1/ServiceRequest/{id}/finalize',
+                            (
                                 'Finalize draft: snapshot attached forms (Questionnaire + render-ready), '
                                 'build FHIR R5 ServiceRequest with contained CarePlan and Questionnaires, '
                                 'set status to active.'
                             ),
-                        },
-                        {
-                            'name': 'archive',
-                            'definition': 'POST /api/v1/ServiceRequest/{id}/archive',
-                        },
-                        {
-                            'name': 'revoke',
-                            'definition': 'POST /api/v1/ServiceRequest/{id}/revoke',
-                            'documentation': 'Cancel a ServiceRequest. Only if no matches are accepted.',
-                        },
-                        {
-                            'name': 'match',
-                            'definition': 'POST /api/v1/ServiceRequest/{id}/match',
-                            'documentation': 'Find matching contracts from contract.pdhc.',
-                        },
-                        {
-                            'name': 'push',
-                            'definition': 'POST /api/v1/ServiceRequest/{id}/push',
-                            'documentation': (
+                        ),
+                        _op(
+                            'ServiceRequest-archive',
+                            'POST /api/v1/ServiceRequest/{id}/archive',
+                            'Archive a ServiceRequest.',
+                        ),
+                        _op(
+                            'ServiceRequest-revoke',
+                            'POST /api/v1/ServiceRequest/{id}/revoke',
+                            'Cancel a ServiceRequest. Only if no matches are accepted.',
+                        ),
+                        _op(
+                            'ServiceRequest-match',
+                            'POST /api/v1/ServiceRequest/{id}/match',
+                            'Find matching contracts from contract.pdhc.',
+                        ),
+                        _op(
+                            'ServiceRequest-push',
+                            'POST /api/v1/ServiceRequest/{id}/push',
+                            (
                                 'Push to all pending matched providers. Bundle includes FHIR ServiceRequest '
                                 'with contained Questionnaires plus render-ready Binary entries for each form.'
                             ),
-                        },
-                        {
-                            'name': 'push-one',
-                            'definition': 'POST /api/v1/ServiceRequest/{id}/push/{match_guid}',
-                            'documentation': 'Push to a single matched provider.',
-                        },
-                        {
-                            'name': 'list-forms',
-                            'definition': 'GET /api/v1/ServiceRequest/{id}/forms',
-                            'documentation': 'List all forms attached to a ServiceRequest.',
-                        },
-                        {
-                            'name': 'add-form',
-                            'definition': 'POST /api/v1/ServiceRequest/{id}/forms',
-                            'documentation': (
+                        ),
+                        _op(
+                            'ServiceRequest-push-one',
+                            'POST /api/v1/ServiceRequest/{id}/push/{match_guid}',
+                            'Push to a single matched provider.',
+                        ),
+                        _op(
+                            'ServiceRequest-list-forms',
+                            'GET /api/v1/ServiceRequest/{id}/forms',
+                            'List all forms attached to a ServiceRequest.',
+                        ),
+                        _op(
+                            'ServiceRequest-add-form',
+                            'POST /api/v1/ServiceRequest/{id}/forms',
+                            (
                                 'Attach a form (by form_guid) to a draft ServiceRequest. '
                                 'The form Questionnaire and render-ready JSON are snapshotted on finalize.'
                             ),
-                        },
-                        {
-                            'name': 'remove-form',
-                            'definition': 'DELETE /api/v1/ServiceRequest/{id}/forms/{form_attachment_guid}',
-                            'documentation': 'Remove an attached form from a draft ServiceRequest.',
-                        },
-                        {
-                            'name': 'reorder-forms',
-                            'definition': 'POST /api/v1/ServiceRequest/{id}/forms/reorder',
-                            'documentation': 'Bulk reorder attached forms (draft only). Body: {ordered_guids: [...]}.',
-                        },
-                        {
-                            'name': 'provider-respond',
-                            'definition': 'POST /api/v1/ServiceRequest/receipt/{token}/respond',
-                            'documentation': 'Provider webhook: accept/reject via receipt token (no auth).',
-                        },
+                        ),
+                        _op(
+                            'ServiceRequest-remove-form',
+                            'DELETE /api/v1/ServiceRequest/{id}/forms/{form_attachment_guid}',
+                            'Remove an attached form from a draft ServiceRequest.',
+                        ),
+                        _op(
+                            'ServiceRequest-reorder-forms',
+                            'POST /api/v1/ServiceRequest/{id}/forms/reorder',
+                            'Bulk reorder attached forms (draft only). Body: {ordered_guids: [...]}.',
+                        ),
+                        _op(
+                            'ServiceRequest-provider-respond',
+                            'POST /api/v1/ServiceRequest/receipt/{token}/respond',
+                            'Provider webhook: accept/reject via receipt token (no auth).',
+                        ),
                     ],
                 },
                 {
@@ -208,37 +252,37 @@ def capability_statement():
                         {'name': 'per_page', 'type': 'number'},
                     ],
                     'operation': [
-                        {
-                            'name': 'form-catalogue',
-                            'definition': 'GET /api/v1/Form',
-                            'documentation': 'List available forms from plan.pdhc.se catalogue (proxy).',
-                        },
-                        {
-                            'name': 'form-detail',
-                            'definition': 'GET /api/v1/Form/{form_guid}',
-                            'documentation': 'Get a single form definition from plan.pdhc.se (proxy).',
-                        },
+                        _op(
+                            'Form-catalogue',
+                            'GET /api/v1/Form',
+                            'List available forms from plan.pdhc.se catalogue (proxy).',
+                        ),
+                        _op(
+                            'Form-detail',
+                            'GET /api/v1/Form/{form_guid}',
+                            'Get a single form definition from plan.pdhc.se (proxy).',
+                        ),
                     ],
                 },
             ],
             'operation': [
-                {
-                    'name': 'request-feed',
-                    'definition': 'GET /api/v1/requests?provider_guid={guid}&since={iso-datetime}',
-                    'documentation': (
+                _op(
+                    'request-feed',
+                    'GET /api/v1/requests?provider_guid={guid}&since={iso-datetime}',
+                    (
                         'Provider subscription feed. Returns dispatched requests '
                         'filtered by provider_guid with cursor-based pagination. '
                         'Supports X-API-Key authentication for service-to-service calls.'
                     ),
-                },
-                {
-                    'name': 'request-status-update',
-                    'definition': 'PUT /api/v1/requests/{request_guid}/status',
-                    'documentation': (
+                ),
+                _op(
+                    'request-status-update',
+                    'PUT /api/v1/requests/{request_guid}/status',
+                    (
                         'Provider status callback. Allows provider portals to report '
                         'acknowledged/in_progress/completed/rejected status back.'
                     ),
-                },
+                ),
             ],
         }],
     }), 200
