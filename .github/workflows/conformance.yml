@@ -57,7 +57,14 @@ env:
   # with the new jar.
   VALIDATOR_VERSION: '6.9.10'
   FHIR_VERSION: '5.0.0'
-  TX_SERVER: 'https://tx.fhir.org/r5'
+  # Ticket #381 — set to `n/a` to disable terminology-server lookups.
+  # request.pdhc emits PDHC-scoped URNs (urn:pdhc:concept / :unit /
+  # :valueset:*) no public tx server can validate; enabling tx makes
+  # every unknown coding cause a 60s tx5 timeout and then fail. Well-
+  # known HL7 codings in the CapabilityStatement resolve from the
+  # bundled package cache and don't need tx. See gateway/Makefile
+  # header for the full rationale.
+  TX_SERVER: 'n/a'
 
 jobs:
   conformance:
