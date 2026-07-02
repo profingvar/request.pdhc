@@ -305,3 +305,38 @@ All edited files are noted here with full path, per Rule 17.
     the ADR added at the top of readme.md and describe_request.pdhc.md;
     the full 656-line describe sweep stays deferred under finding
     §10.1 (child ticket #379).
+
+- 2026-07-02 (rollup #348 commit-2 — 2 tickets + 1 delete + 1 test-fix):
+  - #372 gateway/tests/test_capability_truth.py (NEW): CapabilityStatement
+    truth test. Direction (a): every operation.definition advertised in
+    /api/v1/metadata resolves to a real route in app.url_map with a
+    compatible verb. Direction (b) [route-to-capability] deferred to a
+    follow-up because request.pdhc has many legitimate internal-only
+    endpoints (SSO callbacks, admin, provider webhook receivers) whose
+    allowlist is bigger scope than this ticket. Three tests:
+    metadata reachable + all advertised ops resolve + regression guard
+    for #366/#368 stale operations. Caught real drift on first local
+    run — the `request-feed` operation definition included query
+    string params that the shape helper didn't strip; fixed in the
+    same file. 3/3 pass.
+  - gateway/tests/test_all_endpoints.py (DELETED): the pre-#372 file
+    that claimed "exercises every API endpoint per the capability
+    statement" but was actually a smoke test with hard-coded route
+    paths. Its Rule 20 / Rule 9 role is now filled by
+    test_capability_truth.py.
+  - gateway/tests/test_dispatch.py (test-URL fix follow-on to #368):
+    replaced /api/v1/CarePlan/test-cp/dispatch with the canonical
+    /api/v1/PlanDefinition/test-cp/dispatch in all three tests. Tests
+    now pass in isolation; still 401 in the full suite due to the
+    documented sibling-test AUTH_DISABLED pollution issue (see the
+    SSO-fixture follow-up ticket filed under this rollup).
+  - #376 .github/workflows/test.yml (NEW): first CI for request.pdhc.
+    Python 3.12 matches Dockerfile base. Paths filter targets
+    gateway/** + this workflow. Runs `pytest tests` on push + PR
+    with 7 files ignored (test_request_feed, test_care_plans,
+    test_internal_api, test_patients, test_auth, test_providers,
+    test_dispatch) and 1 test deselected — all 51+3 pre-existing
+    401-auth failures rooted in the SSO fixture regression documented
+    at 2026-06-09. New ticket filed to fix the fixture so those files
+    can rejoin CI. Env sets AUTH_DISABLED=true + HMAC_SECRET (32-char)
+    + INTERNAL_SERVICE_KEY. Dry-run: 102/102 pass locally.
