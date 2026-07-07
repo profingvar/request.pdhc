@@ -502,3 +502,14 @@ All edited files are noted here with full path, per Rule 17.
     at 2026-06-09. New ticket filed to fix the fixture so those files
     can rejoin CI. Env sets AUTH_DISABLED=true + HMAC_SECRET (32-char)
     + INTERNAL_SERVICE_KEY. Dry-run: 102/102 pass locally.
+
+## 2026-07-07 — M0 #419: adopt affiliations[] scope + fill organization_names gap
+- gateway/app/services/reform_scope.py — NEW config-free helpers
+  caller_org_ids() (Zone-1 from affiliations, dual-read) + caller_org_names()
+  (guid->name map from paired affiliation entries; legacy parallel-array
+  fallback). Fills the long-standing organization_names GAP.
+- gateway/app/api/service_requests.py — use helpers; removed the fragile
+  _name_for_org parallel-array lookup (now a dict get).
+- gateway/app/routes/service_requests.py — all 6 org_ids/names read sites use
+  the helpers; org-picker + org_name now from the paired map.
+- gateway/tests/test_reform_scope.py — NEW, 6 tests.

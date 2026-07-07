@@ -13,6 +13,10 @@ from app.services.match_service import (
 )
 from app.services.push_service import push_all_matches, list_receipts_for_request
 from app.services.auth_service import get_current_user_guid, get_current_access_blob
+from app.services.reform_scope import (
+    caller_org_ids as _caller_org_ids,
+    caller_org_names as _caller_org_names,
+)
 
 service_requests_web_bp = Blueprint('service_requests_web', __name__)
 
@@ -58,7 +62,7 @@ def list_view():
     """List ServiceRequests (org-filtered)."""
     blob = get_current_access_blob()
     is_su = blob.get('is_su_admin', False) if blob else False
-    org_guid = (blob.get('organization_ids') or [None])[0] if blob else None
+    org_guid = (_caller_org_ids(blob) or [None])[0] if blob else None  # M0 #419
 
     status_filter = request.args.get('status')
     page = int(request.args.get('page', 1))
@@ -84,7 +88,7 @@ def archived_view():
     """List archived and revoked ServiceRequests."""
     blob = get_current_access_blob()
     is_su = blob.get('is_su_admin', False) if blob else False
-    org_guid = (blob.get('organization_ids') or [None])[0] if blob else None
+    org_guid = (_caller_org_ids(blob) or [None])[0] if blob else None  # M0 #419
 
     status_filter = request.args.get('status', '')
     page = int(request.args.get('page', 1))
@@ -139,8 +143,8 @@ def create_view():
         else:
             blob = get_current_access_blob()
             is_su = bool(blob.get('is_su_admin', False)) if blob else False
-            caller_org_ids_list = list(blob.get('organization_ids') or []) if blob else []
-            caller_org_names_list = list(blob.get('organization_names') or []) if blob else []
+            caller_org_ids_list = _caller_org_ids(blob) if blob else []  # M0 #419
+            caller_org_names_map = _caller_org_names(blob) if blob else {}
 
             # Mirror the API gate (#226): multi-org callers must pick
             # explicitly; the chosen org must be one of theirs.
@@ -157,11 +161,7 @@ def create_view():
                     requesting_org_guid = caller_org_ids_list[0]
 
             org_guid = requesting_org_guid
-            org_name = None
-            if org_guid and org_guid in caller_org_ids_list:
-                idx = caller_org_ids_list.index(org_guid)
-                if 0 <= idx < len(caller_org_names_list):
-                    org_name = caller_org_names_list[idx]
+            org_name = caller_org_names_map.get(org_guid)  # M0 #419: paired
             user_name = blob.get('display_name', blob.get('email', '')) if blob else None
 
             data, status = service_request_service.create_service_request(
@@ -193,7 +193,7 @@ def create_view():
     # Fetch patients from IPS and filter by organisation
     blob = get_current_access_blob()
     is_su = blob.get('is_su_admin', False) if blob else False
-    user_org_ids = blob.get('organization_ids', []) if blob else []
+    user_org_ids = _caller_org_ids(blob) if blob else []  # M0 #419
 
     patients_data, ps = patient_service.list_patients()
     patients = []
@@ -235,13 +235,11 @@ def create_view():
     # Caller affiliations for the requesting-org picker (#226). Multi-
     # org users must pick explicitly; single-org users see a read-only
     # hint and the value flows as a hidden input.
-    caller_org_ids_list = blob.get('organization_ids', []) if blob else []
-    caller_org_names_list = blob.get('organization_names', []) if blob else []
+    caller_org_ids_list = _caller_org_ids(blob) if blob else []  # M0 #419
+    caller_org_names_map = _caller_org_names(blob) if blob else {}
     caller_orgs = [
-        {'guid': gid,
-         'name': (caller_org_names_list[i]
-                  if i < len(caller_org_names_list) else gid)}
-        for i, gid in enumerate(caller_org_ids_list)
+        {'guid': gid, 'name': caller_org_names_map.get(gid) or gid}
+        for gid in caller_org_ids_list
     ]
 
     import json

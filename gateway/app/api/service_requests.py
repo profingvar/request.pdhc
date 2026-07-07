@@ -7,24 +7,12 @@ from app.services import service_request_service, contract_service, plan_definit
 from app.services import patient_service
 from app.services.audit_service import audit_read, log_event
 from app.services.auth_service import get_current_user_guid, get_current_access_blob
+from app.services.reform_scope import (
+    caller_org_ids as _caller_org_ids,
+    caller_org_names as _caller_org_names,
+)
 
 service_requests_bp = Blueprint('service_requests_api', __name__)
-
-
-def _name_for_org(org_guid, org_ids, org_names):
-    """Look up the human-readable name of ``org_guid`` from the
-    caller's parallel ``organization_ids`` / ``organization_names``
-    lists. Returns None when the guid isn't in the caller's list (eg.
-    SU admins choosing for another org)."""
-    if not org_guid or not org_ids:
-        return None
-    try:
-        idx = org_ids.index(org_guid)
-    except ValueError:
-        return None
-    if 0 <= idx < len(org_names):
-        return org_names[idx]
-    return None
 
 
 @service_requests_bp.route('/ServiceRequest', methods=['POST'])
@@ -51,8 +39,11 @@ def create():
 
     blob = get_current_access_blob()
     is_su = bool(blob.get('is_su_admin', False)) if blob else False
-    caller_org_ids_list = list(blob.get('organization_ids') or []) if blob else []
-    caller_org_names_list = list(blob.get('organization_names') or []) if blob else []
+    # M0 #419: Zone-1 scope from affiliations[] (dual-read fallback), and the
+    # guid->name map from the same affiliation entries (fills the legacy
+    # organization_names gap).
+    caller_org_ids_list = _caller_org_ids(blob) if blob else []
+    caller_org_names_map = _caller_org_names(blob) if blob else {}
     caller_org_ids = set(caller_org_ids_list)
     caller_user_guid = get_current_user_guid()
 
@@ -188,7 +179,7 @@ def create():
     # ---- end of authorisation gate --------------------------------
 
     org_guid = requesting_org_guid
-    org_name = _name_for_org(org_guid, caller_org_ids_list, caller_org_names_list)
+    org_name = caller_org_names_map.get(org_guid)  # M0 #419: paired guid->name
     user_name = blob.get('display_name', blob.get('email', '')) if blob else None
 
     log_event(
@@ -226,7 +217,7 @@ def list_all():
     """List ServiceRequests (org-filtered for non-SU)."""
     blob = get_current_access_blob()
     is_su = blob.get('is_su_admin', False) if blob else False
-    org_guid = (blob.get('organization_ids') or [None])[0] if blob else None
+    org_guid = (_caller_org_ids(blob) or [None])[0] if blob else None  # M0 #419
 
     data, status = service_request_service.list_service_requests(
         user_guid=get_current_user_guid(),
