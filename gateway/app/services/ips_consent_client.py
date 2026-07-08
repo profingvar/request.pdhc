@@ -27,6 +27,8 @@ from typing import Iterable, Optional, Sequence
 import requests
 from flask import current_app
 
+from app.services.session_headers import outbound_session_headers
+
 
 DEFAULT_TTL_SECONDS = 30
 DEFAULT_TIMEOUT = 4.0
@@ -69,6 +71,7 @@ class IpsConsentClient:
         h = {"Accept": "application/json"}
         if self.api_key:
             h["X-API-Key"] = self.api_key
+        h.update(outbound_session_headers())
         return h
 
     def fetch_active_consents(self, patient_guid: str) -> list[Consent]:

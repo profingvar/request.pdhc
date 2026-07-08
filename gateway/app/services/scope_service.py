@@ -15,6 +15,8 @@ import logging
 import requests
 from flask import current_app
 
+from app.services.session_headers import outbound_session_headers
+
 logger = logging.getLogger(__name__)
 
 DEAD_STATUSES = {'revoked', 'terminated', 'cancelled'}
@@ -44,7 +46,8 @@ def fetch_scope(contract_guid):
         resp = requests.get(
             url,
             headers={'X-Service-Key': service_key,
-                     'X-Source-Service': 'request.pdhc'},
+                     'X-Source-Service': 'request.pdhc',
+                     **outbound_session_headers()},
             timeout=10,
         )
     except requests.RequestException as e:

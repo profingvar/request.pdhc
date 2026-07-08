@@ -1,10 +1,12 @@
 import requests
 from flask import current_app
 
+from app.services.session_headers import outbound_session_headers
+
 
 def _headers():
     """Build headers for upstream Plan requests."""
-    return {'Accept': 'application/json'}
+    return {'Accept': 'application/json', **outbound_session_headers()}
 
 
 def _plan_url(path=''):

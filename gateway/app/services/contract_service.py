@@ -1,10 +1,12 @@
 import requests
 from flask import current_app
 
+from app.services.session_headers import outbound_session_headers
+
 
 def _headers():
     """Build headers for upstream Contract requests."""
-    return {'Accept': 'application/fhir+json'}
+    return {'Accept': 'application/fhir+json', **outbound_session_headers()}
 
 
 def _contract_url(path=''):

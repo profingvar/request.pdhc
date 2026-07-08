@@ -1,6 +1,8 @@
 import requests
 from flask import current_app
 
+from app.services.session_headers import outbound_session_headers
+
 
 def _headers():
     """Build headers for upstream IPS requests using service API key."""
@@ -8,6 +10,7 @@ def _headers():
     api_key = current_app.config.get('IPS_API_KEY')
     if api_key:
         headers['Authorization'] = f'ApiKey {api_key}'
+    headers.update(outbound_session_headers())
     return headers
 
 

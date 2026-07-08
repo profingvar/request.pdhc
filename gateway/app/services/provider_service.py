@@ -2,12 +2,15 @@ import requests
 from flask import current_app
 from app.services.auth_service import get_upstream_token
 
+from app.services.session_headers import outbound_session_headers
+
 
 def _headers():
     headers = {'Accept': 'application/json'}
     token = get_upstream_token()
     if token:
         headers['Authorization'] = f'Bearer {token}'
+    headers.update(outbound_session_headers())
     return headers
 
 

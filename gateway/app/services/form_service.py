@@ -3,12 +3,15 @@
 import requests
 from flask import current_app
 
+from app.services.session_headers import outbound_session_headers
+
 
 def _headers():
     h = {'Accept': 'application/json'}
     key = current_app.config.get('PLAN_API_KEY')
     if key:
         h['X-API-Key'] = key
+    h.update(outbound_session_headers())
     return h
 
 

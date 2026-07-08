@@ -4,6 +4,7 @@ from app import db
 from app.models.dispatch_models import DispatchRequest, DispatchReceipt
 from app.services.auth_service import get_upstream_token
 from app.services.audit_service import log_event
+from app.services.session_headers import outbound_session_headers
 from app.services.ips_consent_client import (
     consent_covers_dispatch,
     get_active_consents,
@@ -15,6 +16,7 @@ def _headers():
     token = get_upstream_token()
     if token:
         headers['Authorization'] = f'Bearer {token}'
+    headers.update(outbound_session_headers())
     return headers
 
 
