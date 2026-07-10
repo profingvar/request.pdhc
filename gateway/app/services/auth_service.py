@@ -129,7 +129,11 @@ def map_role(access_blob):
         return 'read_only'
     if access_blob.get('is_su_admin'):
         return 'admin'
-    if access_blob.get('user_type') == 'professional' and access_blob.get('effective_phases'):
+    # M0 #409: session_phases is the reform-canonical field; fall back to
+    # the dual-emitted legacy effective_phases for pre-reform tokens.
+    phases = (access_blob.get('session_phases')
+              or access_blob.get('effective_phases'))
+    if access_blob.get('user_type') == 'professional' and phases:
         return 'read_write'
     return 'read_only'
 
