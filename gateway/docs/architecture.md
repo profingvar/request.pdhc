@@ -525,3 +525,13 @@ Any failure aborts with 4xx + `OperationOutcome`.
 
 `request.pdhc` is the orchestrator that ties them together for the
 clinical-lead UX.
+
+## Port Allocation
+
+All ports bind to `127.0.0.1` (loopback only); external traffic arrives
+via the reverse proxy.
+
+| Port | Service |
+|------|---------|
+| 9060 | Flask application (Gunicorn) |
+| 9061 | PostgreSQL database |

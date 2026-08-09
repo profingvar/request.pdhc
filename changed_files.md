@@ -513,3 +513,4 @@ All edited files are noted here with full path, per Rule 17.
 - gateway/app/routes/service_requests.py — all 6 org_ids/names read sites use
   the helpers; org-picker + org_name now from the paired map.
 - gateway/tests/test_reform_scope.py — NEW, 6 tests.
+- request.pdhc/gateway/docs/architecture.md (Port Allocation section)
