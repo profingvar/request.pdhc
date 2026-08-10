@@ -528,3 +528,5 @@ All edited files are noted here with full path, per Rule 17.
 - gateway/app/services/ips_consent_client.py (#558: Authorization: ApiKey + /consents/check per (patient,grantee); was X-API-Key + clinic-gated /consents list → 401 → dispatch fail-closed)
 - gateway/app/services/dispatch_service.py (pass destination_caregiver_guid to get_active_consents)
 - gateway/tests/test_consent_at_dispatch.py (updated cache tests for per-grantee API + TestConsentTransport)
+- gateway/app/services/context_service.py (_infer_response_type now resolves the concept's real response_type from plan.pdhc (authority) + vocab map, heuristic fallback; fixes numeric concepts (FEV1/spo2/peak-flow) being mis-typed 'text' → provider 422)
+- gateway/tests/test_context_response_type.py (NEW — 7 tests: plan-authoritative resolution + heuristic fallback + vocab map)
