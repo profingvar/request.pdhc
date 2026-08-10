@@ -1,5 +1,8 @@
 import uuid
-from flask import Blueprint, jsonify, request, redirect, session, url_for, current_app
+from flask import (
+    Blueprint, jsonify, request, redirect, session, url_for, current_app,
+    render_template_string,
+)
 from flask_login import login_user, logout_user, current_user
 from app import db
 from app.models.dispatch_models import LocalUser
@@ -98,9 +101,56 @@ def logout():
         ip_address=request.remote_addr,
     )
 
-    if request.path.startswith('/api/'):
+    # The route lives under /api/, so a path prefix can't tell a browser
+    # form POST from a programmatic caller — use content negotiation. JSON/
+    # API clients get JSON; a browser gets a logged-out page that ALSO kills
+    # the SSO browser session, so the next login re-authenticates fresh
+    # (picking up any affiliation/blob changes).
+    if request.is_json or not request.accept_mimetypes.accept_html:
         return jsonify({'message': 'Logged out'}), 200
-    return redirect(url_for('auth.login'))
+    return redirect(url_for('auth.logged_out'))
+
+
+@auth_bp.route('/logged-out', methods=['GET'])
+def logged_out():
+    """Post-logout landing page. Auto-submits a hidden POST to the SSO
+    browser /logout endpoint so the sso.pdhc session cookie is terminated
+    too — without this the next 'login' silently re-authenticates from the
+    surviving SSO session and the user appears never to have logged out."""
+    base = (current_app.config.get('SSO_BASE_URL') or '').rstrip('/')
+    sso_logout_url = f"{base}/logout" if base else ''
+    return render_template_string(
+        LOGGED_OUT_PAGE, sso_logout_url=sso_logout_url,
+        login_url=url_for('auth.login'))
+
+
+LOGGED_OUT_PAGE = """\
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Logged out — request.pdhc</title>
+<style>
+  body { font-family: system-ui, sans-serif; display: flex; justify-content: center;
+         align-items: center; min-height: 100vh; margin: 0; background: #f5f5f5; }
+  .box { text-align: center; background: white; padding: 2rem 3rem; border-radius: 8px;
+         box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+  a { color: #2563eb; text-decoration: none; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h2>You have been logged out</h2>
+  <p><a href="{{ login_url }}">Log in again</a></p>
+</div>
+{% if sso_logout_url %}
+<iframe name="sso_frame" style="display:none;"></iframe>
+<form id="ssoLogout" method="post" action="{{ sso_logout_url }}" target="sso_frame"></form>
+<script>document.getElementById('ssoLogout').submit();</script>
+{% endif %}
+</body>
+</html>
+"""
 
 
 @auth_bp.route('/me', methods=['GET'])

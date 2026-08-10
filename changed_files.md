@@ -514,3 +514,4 @@ All edited files are noted here with full path, per Rule 17.
   the helpers; org-picker + org_name now from the paired map.
 - gateway/tests/test_reform_scope.py — NEW, 6 tests.
 - request.pdhc/gateway/docs/architecture.md (Port Allocation section)
+- gateway/app/api/auth.py (logout: redirect browser to /logged-out + kill SSO browser session; JSON preserved for API)
