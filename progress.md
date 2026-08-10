@@ -773,3 +773,36 @@ the SSO path was never exercised. Flipping to prod auth mode unmasked
 both config gaps at once. See CLAUDE.md §9-style sibling: worth a
 proactive audit of every service's `.env` on miserver for missing
 `SSO_CLIENT_ID`/`SECRET` before the next prod flip.
+
+---
+
+## Patient timeline (metro map) — 2026-08-10
+
+New feature: a "separate HTML" that draws a plan schedule as a metro map —
+one line per activity, one station per scheduled occurrence; hovering a
+station lists the concepts collected there (the activity's transactions,
+required/optional + unit). Endless (unbounded recurring) requests draw the
+first month then a dashed "…"; requests bounded by count/duration/period_end
+end in a solid terminus ring.
+
+**Files**
+- `gateway/app/services/timeline_service.py` (NEW) — pure `build_timeline()`
+  schedule model (lines/stations/gridlines). 10 unit tests
+  (`tests/test_timeline_service.py`), all green.
+- `gateway/app/templates/service_requests/plan_timeline.html` (NEW) — SVG map
+  + self-contained hover-tooltip JS + static per-line concept legend.
+- `gateway/app/routes/service_requests.py` — `timeline_view`
+  (`/service-requests/<guid>/timeline`, from the SR snapshot, anchored at
+  period_start, bounded by period_end) + `plan_timeline_preview`
+  (`/plan-timeline/<plandef_guid>`, anchored today, endless).
+- `view.html` — "View Timeline" button on the SR PlanDefinition card.
+- `create.html` — "Preview schedule timeline ↗" link that appears on the
+  create form once a PlanDefinition is picked (preview before dispatch).
+
+**Deployed** to request.pdhc.se 2026-08-10 via `docker-compose up -d --build app`
+(project `request`; both prod files diffed identical to base before overwrite —
+no server-only divergence). Verified live: health 200, both routes registered,
+and the dispatched Medituner SR `4b8598b0-…` (asthma plan, UAS requester,
+no period → endless) renders through the running container: Daily diary 31
+stations/9 concepts + Weekly spirometry 5 stations/1 concept.
+Commits b8ae4db (feature) + create-page preview link.

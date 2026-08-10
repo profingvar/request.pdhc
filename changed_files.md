@@ -520,3 +520,5 @@ All edited files are noted here with full path, per Rule 17.
 - gateway/app/routes/service_requests.py (add timeline_view /service-requests/<guid>/timeline + plan_timeline_preview /plan-timeline/<plandef_guid>)
 - gateway/app/templates/service_requests/view.html (add "View Timeline" button on PlanDefinition card)
 - gateway/tests/test_timeline_service.py (NEW — 10 unit tests for the schedule builder)
+- gateway/app/templates/service_requests/create.html ("Preview schedule timeline ↗" link → /plan-timeline/<guid>, shown once a PlanDefinition is selected)
+- progress.md (Patient timeline metro-map section, 2026-08-10)

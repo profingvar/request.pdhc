@@ -61,6 +61,12 @@
         <option value="{{ pdid }}">{{ pdtitle }}</option>
       {% endfor %}
     </select>
+    <a id="plandef-preview-link" href="#" target="_blank" rel="noopener"
+       class="btn btn-sm btn-secondary"
+       data-base="{{ url_for('service_requests_web.plan_timeline_preview', plandef_guid='__GUID__') }}"
+       style="margin-top:0.4rem; display:none;">
+      <i data-lucide="git-branch" style="width:0.9rem;height:0.9rem"></i> Preview schedule timeline ↗
+    </a>
   </div>
 
   <div class="form-group" id="forms-group">
@@ -94,6 +100,15 @@ const PLANDEFS_FULL = {{ plandefs_full_json | safe }};
 
 document.getElementById('plan_definition_guid').addEventListener('change', function() {
   const guid = this.value;
+  const previewLink = document.getElementById('plandef-preview-link');
+  if (previewLink) {
+    if (guid) {
+      previewLink.href = previewLink.dataset.base.replace('__GUID__', encodeURIComponent(guid));
+      previewLink.style.display = 'inline-flex';
+    } else {
+      previewLink.style.display = 'none';
+    }
+  }
   const formSelect = document.getElementById('form_guids');
   const infoDiv = document.getElementById('plandef-forms');
 
