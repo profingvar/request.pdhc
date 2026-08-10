@@ -837,3 +837,24 @@ on the `/consents` gate used by `dispatch_service` when a
 `destination_caregiver_guid` is present. Failure mode is fail-CLOSED (empty
 consents → dispatch refused 403), so it over-blocks rather than leaks — safer,
 but wrong. Not bundled here (separate safety gate); ticket opened.
+
+---
+
+## #558 — consent-gate auth fix (twin of the spärr block fix) — 2026-08-10
+
+`ips_consent_client` had the same `X-API-Key` bug as the block client, on the
+`/consents` gate used by `dispatch_service` when a `destination_caregiver_guid`
+is present. Confirmed the header flip alone was insufficient: ips `list_consents`
+is clinic-gated (`_can_act_on_patient`) → 403 for the service-account key; and
+`care_access_check` answers a different question (observation-read zone, not the
+dispatch consent gate). Failure mode was fail-CLOSED (empty consents →
+`no_consent` → every cross-caregiver dispatch refused 403).
+
+Fix (2-service): added a relationship-free predicate on **ips.pdhc**
+(`GET /api/v1/patients/<pid>/consents/check?grantee_caregiver_guid=<cg>`, commit
+d8b6dbb, mirror of `/blocks/check`), and pointed `ips_consent_client` at it with
+`Authorization: ApiKey`, cached per (patient, grantee); `dispatch_service` passes
+the destination caregiver through. `consent_covers_dispatch` logic unchanged.
+ips suite 402 green; request suite 188 green. Both deployed 2026-08-10; verified
+live: the deployed request client → deployed ips `/consents/check` returns 404
+(patient absent) instead of 401 — auth now passes.
