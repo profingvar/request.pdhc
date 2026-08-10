@@ -806,3 +806,34 @@ and the dispatched Medituner SR `4b8598b0-…` (asthma plan, UAS requester,
 no period → endless) renders through the running container: Daily diary 31
 stations/9 concepts + Weekly spirometry 5 stations/1 concept.
 Commits b8ae4db (feature) + create-page preview link.
+
+---
+
+## Spärr filter auth fix (ips 401) — 2026-08-10
+
+Chased down the `ips block fetch … -> 401` seen while rendering the timeline.
+Root cause (three layers, all real): request.pdhc's `ips_client` sent the key
+as `X-API-Key`, but ips.pdhc `require_auth` reads ONLY the `Authorization`
+header (`Bearer`/`ApiKey`) — so every `/blocks` call 401'd; the code swallowed
+4xx as "no blocks" → `is_sr_visible` always True → **the SR-list/detail spärr
+filter silently failed open** (no SR ever hidden). It also targeted the staff
+`/blocks` list (clinic-gated, redacts `source_scope_id` for the service-account
+key) and parsed the wrong response key (`blocks`/`entry` vs ips `items`).
+
+Fix (chosen approach A): switched to ips.pdhc's purpose-built cross-service
+predicate `GET /api/v1/patients/<pid>/blocks/check?source_clinic_id=<org>` with
+`Authorization: ApiKey`. No patient-clinic relationship required, un-redacted
+`is_blocked` + `blocking_scopes`, clinic-vs-caregiver match done server-side.
+Filter is now one cached lookup per (patient, requester_org); v1
+lift-exposes-SR semantics preserved; fails open only on genuine errors.
+Rewrote `test_blocks_filter.py` (17 tests, incl. a transport assertion that the
+header is `Authorization: ApiKey` and the endpoint is `/blocks/check`). Full
+suite 185 passing. Deployed 2026-08-10 (`docker-compose up -d --build app`);
+verified live: `check_block` returns non-401, Medituner SR stays visible
+(patient absent from ips → no block).
+
+**Follow-up (ticketed):** `ips_consent_client.py` has the SAME `X-API-Key` bug
+on the `/consents` gate used by `dispatch_service` when a
+`destination_caregiver_guid` is present. Failure mode is fail-CLOSED (empty
+consents → dispatch refused 403), so it over-blocks rather than leaks — safer,
+but wrong. Not bundled here (separate safety gate); ticket opened.
