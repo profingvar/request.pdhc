@@ -52,7 +52,7 @@ def create_dispatch(plan_definition_guid=None, provider_guid=None,
     # PDL gate before idempotency: a consent-failing dispatch must not
     # be able to "succeed" by replaying a prior idempotency key.
     if patient_guid and destination_caregiver_guid:
-        consents = get_active_consents(patient_guid)
+        consents = get_active_consents(patient_guid, destination_caregiver_guid)
         ok, reason = consent_covers_dispatch(
             consents,
             destination_caregiver_guid=destination_caregiver_guid,

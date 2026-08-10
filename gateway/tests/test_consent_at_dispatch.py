@@ -152,36 +152,83 @@ class TestGetActiveConsents:
     def test_calls_ips_and_caches(self, app):
         with app.app_context():
             fake_client = MagicMock(spec=icc.IpsConsentClient)
-            fake_client.fetch_active_consents.return_value = [
+            fake_client.fetch_consents_for_grantee.return_value = [
                 _consent(grantee="dest-caregiver"),
             ]
-            r1 = get_active_consents("p1", client=fake_client)
-            r2 = get_active_consents("p1", client=fake_client)
+            r1 = get_active_consents("p1", "dest-caregiver", client=fake_client)
+            r2 = get_active_consents("p1", "dest-caregiver", client=fake_client)
             # Second call is cached -> http hit count stays at 1.
-            assert fake_client.fetch_active_consents.call_count == 1
+            assert fake_client.fetch_consents_for_grantee.call_count == 1
             assert len(r1) == 1 and len(r2) == 1
 
-    def test_invalidate_re_fetches(self, app):
+    def test_distinct_grantee_is_distinct_key(self, app):
         with app.app_context():
             fake_client = MagicMock(spec=icc.IpsConsentClient)
-            fake_client.fetch_active_consents.return_value = [
+            fake_client.fetch_consents_for_grantee.return_value = []
+            get_active_consents("p1", "cg-a", client=fake_client)
+            get_active_consents("p1", "cg-b", client=fake_client)
+            assert fake_client.fetch_consents_for_grantee.call_count == 2
+
+    def test_invalidate_re_fetches_all_grantees(self, app):
+        with app.app_context():
+            fake_client = MagicMock(spec=icc.IpsConsentClient)
+            fake_client.fetch_consents_for_grantee.return_value = [
                 _consent(grantee="dest-caregiver"),
             ]
-            get_active_consents("p1", client=fake_client)
+            get_active_consents("p1", "dest-caregiver", client=fake_client)
             icc.invalidate("p1")
-            get_active_consents("p1", client=fake_client)
-            assert fake_client.fetch_active_consents.call_count == 2
+            get_active_consents("p1", "dest-caregiver", client=fake_client)
+            assert fake_client.fetch_consents_for_grantee.call_count == 2
 
     def test_drops_inactive_rows(self, app):
         with app.app_context():
             fake_client = MagicMock(spec=icc.IpsConsentClient)
-            fake_client.fetch_active_consents.return_value = [
+            fake_client.fetch_consents_for_grantee.return_value = [
                 _consent(grantee="dest-caregiver", is_active=True),
-                _consent(grantee="other", is_active=False),
+                _consent(grantee="dest-caregiver", is_active=False),
             ]
-            r = get_active_consents("p1", client=fake_client)
+            r = get_active_consents("p1", "dest-caregiver", client=fake_client)
             assert len(r) == 1
-            assert r[0].grantee_caregiver_guid == "dest-caregiver"
+            assert r[0].is_active is True
+
+
+class TestConsentTransport:
+    def test_uses_authorization_apikey_and_check_endpoint(self):
+        captured = {}
+
+        class Resp:
+            status_code = 200
+            def json(self):
+                return {"has_active_consent": True, "consents": [{
+                    "guid": "c1", "patient_guid": "p1",
+                    "grantee_caregiver_guid": "dest-cg",
+                    "consented_concept_guids": None, "is_active": True,
+                }]}
+
+        def fake_get(url, params=None, headers=None, timeout=None):
+            captured.update(url=url, params=params, headers=headers)
+            return Resp()
+
+        c = icc.IpsConsentClient(api_key="RAWKEY", base_url="https://ips.pdhc.se")
+        with patch("app.services.ips_consent_client.requests.get", fake_get):
+            out = c.fetch_consents_for_grantee("p1", "dest-cg")
+
+        assert len(out) == 1 and out[0].grantee_caregiver_guid == "dest-cg"
+        assert captured["url"].endswith("/patients/p1/consents/check")
+        assert captured["params"] == {"grantee_caregiver_guid": "dest-cg"}
+        assert captured["headers"]["Authorization"] == "ApiKey RAWKEY"
+        assert "X-API-Key" not in captured["headers"]
+
+    def test_4xx_returns_empty(self):
+        class Resp:
+            status_code = 403
+            def json(self):
+                return {}
+
+        c = icc.IpsConsentClient(api_key="k", base_url="https://ips.pdhc.se")
+        with patch("app.services.ips_consent_client.requests.get",
+                   return_value=Resp()):
+            assert c.fetch_consents_for_grantee("p1", "dest-cg") == []
 
 
 # ---------------------------------------------------------------------------

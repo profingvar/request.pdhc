@@ -525,3 +525,6 @@ All edited files are noted here with full path, per Rule 17.
 - gateway/app/services/ips_client.py (spärr auth fix: Authorization: ApiKey + /blocks/check predicate; was X-API-Key + clinic-gated /blocks list → always 401 → filter failed open)
 - gateway/app/services/service_request_service.py (callers use check-based is_sr_visible(sr) / filter_visible_srs(items))
 - gateway/tests/test_blocks_filter.py (rewritten for the check-based API; 17 tests incl. transport header assertion)
+- gateway/app/services/ips_consent_client.py (#558: Authorization: ApiKey + /consents/check per (patient,grantee); was X-API-Key + clinic-gated /consents list → 401 → dispatch fail-closed)
+- gateway/app/services/dispatch_service.py (pass destination_caregiver_guid to get_active_consents)
+- gateway/tests/test_consent_at_dispatch.py (updated cache tests for per-grantee API + TestConsentTransport)

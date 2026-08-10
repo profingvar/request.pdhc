@@ -1,8 +1,17 @@
 """Client for ips.pdhc consent surface — IPS Renov 2 (#198) consumer.
 
-Mirrors ``services/ips_client.py`` (the block-fetch path) — same 30 s
-TTL cache, same per-patient indexing, same invalidation hook — adapted
-for the ``PatientConsent`` resource.
+Mirrors ``services/ips_client.py`` (the block-check path) — same 30 s TTL
+cache, same invalidation hook — adapted for the ``PatientConsent`` resource.
+
+Transport (2026-08-10, #558): consults ips.pdhc's cross-service predicate
+``GET /api/v1/patients/<pid>/consents/check?grantee_caregiver_guid=<cg>``,
+authenticated with ``Authorization: ApiKey <key>``. That endpoint requires no
+patient-clinic relationship (the exact mirror of ``/blocks/check``) and
+returns only the ACTIVE consents naming the asking caregiver. The previous
+implementation sent the key as ``X-API-Key`` (ips reads only ``Authorization``)
+and hit the clinic-gated ``/consents`` list — so every call 401'd, the empty
+result flowed into ``consent_covers_dispatch``, and any cross-caregiver
+dispatch was refused fail-closed (reason ``no_consent``).
 
 What this enforces (Lag 2022:913 § 5):
   - Dispatch crosses caregivers; the destination caregiver must hold
@@ -70,24 +79,33 @@ class IpsConsentClient:
     def _headers(self) -> dict:
         h = {"Accept": "application/json"}
         if self.api_key:
-            h["X-API-Key"] = self.api_key
+            # ips.pdhc require_auth reads ONLY the Authorization header and
+            # accepts the "ApiKey <raw>" scheme (services/auth_service.py).
+            h["Authorization"] = f"ApiKey {self.api_key}"
         h.update(outbound_session_headers())
         return h
 
-    def fetch_active_consents(self, patient_guid: str) -> list[Consent]:
-        if not self.base_url or not patient_guid:
+    def fetch_consents_for_grantee(
+        self, patient_guid: str, grantee_caregiver_guid: str,
+    ) -> list[Consent]:
+        """Active consents from ``patient_guid`` to ``grantee_caregiver_guid``
+        via ips /consents/check. On any error / 404 returns [] (fail-open on
+        genuine errors only — but note the dispatch gate then fails CLOSED,
+        because zero consents means 'no_consent')."""
+        if not self.base_url or not patient_guid or not grantee_caregiver_guid:
             return []
         url = (
-            f"{self.base_url}/api/v1/patients/{patient_guid}/consents"
+            f"{self.base_url}/api/v1/patients/{patient_guid}/consents/check"
         )
         try:
             r = requests.get(
-                url, params={"active": "true"},
+                url,
+                params={"grantee_caregiver_guid": grantee_caregiver_guid},
                 headers=self._headers(), timeout=self.timeout,
             )
         except requests.RequestException:
             current_app.logger.warning(
-                "ips consent fetch failed (network) for %s",
+                "ips consent check failed (network) for %s",
                 patient_guid[:12] if patient_guid else "?",
             )
             return []
@@ -95,24 +113,21 @@ class IpsConsentClient:
             return []
         if r.status_code >= 400:
             current_app.logger.warning(
-                "ips consent fetch %s -> %s",
+                "ips consent check %s -> %s",
                 patient_guid[:12] if patient_guid else "?",
                 r.status_code,
             )
             return []
         payload = r.json() or {}
-        raw = (
-            payload.get("items")
-            or payload.get("consents")
-            or payload.get("entry")
-            or []
-        )
+        raw = payload.get("consents") or []
         return [
             Consent.from_dict(c) for c in raw if isinstance(c, dict)
         ]
 
 
 class _ConsentCache:
+    """TTL cache keyed by ``"<patient>|<grantee>"``."""
+
     def __init__(self, ttl: float = DEFAULT_TTL_SECONDS):
         self.ttl = ttl
         self._lock = threading.Lock()
@@ -120,18 +135,23 @@ class _ConsentCache:
         self.hits = 0
         self.misses = 0
 
-    def get(self, patient_guid: str) -> Optional[list[Consent]]:
+    @staticmethod
+    def _key(patient_guid: str, grantee_guid: str) -> str:
+        return f"{patient_guid}|{grantee_guid}"
+
+    def get(self, patient_guid: str, grantee_guid: str) -> Optional[list[Consent]]:
         with self._lock:
-            entry = self._data.get(patient_guid)
+            entry = self._data.get(self._key(patient_guid, grantee_guid))
             if not entry or time.monotonic() >= entry[0]:
                 self.misses += 1
                 return None
             self.hits += 1
             return entry[1]
 
-    def put(self, patient_guid: str, consents: list[Consent]) -> None:
+    def put(self, patient_guid: str, grantee_guid: str,
+            consents: list[Consent]) -> None:
         with self._lock:
-            self._data[patient_guid] = (
+            self._data[self._key(patient_guid, grantee_guid)] = (
                 time.monotonic() + self.ttl, consents,
             )
 
@@ -140,7 +160,10 @@ class _ConsentCache:
             if patient_guid is None:
                 self._data.clear()
             else:
-                self._data.pop(patient_guid, None)
+                # Composite keys → evict every (patient, *) entry.
+                prefix = f"{patient_guid}|"
+                for k in [k for k in self._data if k.startswith(prefix)]:
+                    self._data.pop(k, None)
 
     def stats(self) -> dict:
         with self._lock:
@@ -173,23 +196,27 @@ def _default_client() -> IpsConsentClient:
 
 def get_active_consents(
     patient_guid: str,
+    grantee_caregiver_guid: str,
     *,
     client: Optional[IpsConsentClient] = None,
     use_cache: bool = True,
 ) -> list[Consent]:
-    if not patient_guid:
+    """Active consents from ``patient_guid`` to ``grantee_caregiver_guid``,
+    cached per (patient, grantee)."""
+    if not patient_guid or not grantee_caregiver_guid:
         return []
     if use_cache:
-        cached = _cache.get(patient_guid)
+        cached = _cache.get(patient_guid, grantee_caregiver_guid)
         if cached is not None:
             return cached
     client = client or _default_client()
     consents = [
-        c for c in client.fetch_active_consents(patient_guid)
+        c for c in client.fetch_consents_for_grantee(
+            patient_guid, grantee_caregiver_guid)
         if c.is_active
     ]
     if use_cache:
-        _cache.put(patient_guid, consents)
+        _cache.put(patient_guid, grantee_caregiver_guid, consents)
     return consents
 
 
