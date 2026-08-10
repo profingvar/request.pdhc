@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+{% block title %}Timeline — {{ plan_title }}{% endblock %}
+
+{% block head %}
+<style>
+  /* Metro-map schedule timeline. Line colours are data-driven (metro maps are
+     unreadable without distinct hues) — the one sanctioned decorative use. */
+  .tl-wrap { position: relative; }
+  .tl-scroll { overflow-x: auto; border: 1px solid var(--border);
+               border-radius: 6px; background: var(--card-bg); padding: 0.5rem 0; }
+  .tl-svg { display: block; }
+  .tl-grid { stroke: var(--border); stroke-width: 1; }
+  .tl-gridlabel { fill: var(--text-muted); font-size: 10px;
+                  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .tl-linelabel { fill: var(--text); font-size: 12px; font-weight: 700;
+                  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .tl-cadence { fill: var(--text-muted); font-size: 10px;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .tl-station { cursor: pointer; }
+  .tl-station:hover circle.node { stroke-width: 5; }
+  .tl-stationlabel { fill: var(--text-muted); font-size: 9px; text-anchor: middle;
+                     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .tl-ellipsis { fill: var(--text-muted); font-size: 20px; font-weight: 700; }
+
+  .tl-tip { position: absolute; z-index: 20; min-width: 200px; max-width: 300px;
+            background: var(--card-bg); border: 1px solid var(--border);
+            border-radius: 6px; box-shadow: 0 4px 16px rgba(15,23,42,0.16);
+            padding: 0.6rem 0.7rem; font-size: 11px; pointer-events: none;
+            display: none; }
+  .tl-tip h4 { margin: 0 0 0.15rem; font-size: 12px; display: flex;
+               align-items: center; gap: 0.35rem; }
+  .tl-tip .tl-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .tl-tip .tl-meta { color: var(--text-muted); margin: 0 0 0.4rem; font-size: 10px; }
+  .tl-tip ul { margin: 0; padding-left: 0; list-style: none; }
+  .tl-tip li { display: flex; justify-content: space-between; gap: 0.5rem;
+               padding: 0.12rem 0; border-top: 1px solid var(--border); }
+  .tl-tip li:first-child { border-top: none; }
+  .tl-tip .req-required { color: var(--danger); font-weight: 700; }
+  .tl-tip .req-optional { color: var(--text-muted); }
+  .tl-tip .tl-unit { color: var(--text-muted); }
+
+  .tl-legend { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.75rem; }
+  .tl-legend .card { flex: 1 1 240px; }
+  .tl-legend h4 { margin: 0 0 0.25rem; font-size: 12px; display: flex;
+                  align-items: center; gap: 0.4rem; }
+  .tl-legend .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+  .tl-legend ul { margin: 0.3rem 0 0; padding-left: 0; list-style: none; }
+  .tl-legend li { display: flex; justify-content: space-between; gap: 0.5rem;
+                  padding: 0.1rem 0; }
+  .tl-note { color: var(--text-muted); font-size: 11px; margin: 0.3rem 0 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap;">
+  <div>
+    <h1 style="margin-bottom:0.2rem;">Patient timeline</h1>
+    <p class="tl-note" style="font-size:12px;">
+      <strong>{{ plan_title }}</strong>
+      {% if patient_label %} · Patient {{ patient_label }}{% endif %}
+    </p>
+    <p class="tl-note">
+      Schedule from <strong>{{ tl.anchor }}</strong>{% if tl.anchor_assumed %}
+      (assumed start = today — no request period set){% endif %}.
+      {% if tl.any_truncated %} Recurring activities are drawn for the first
+      {{ tl.window_days }} days and continue past the “…”.{% endif %}
+      Hover a station to see the concepts collected there.
+    </p>
+  </div>
+  <div>
+    {% if back_url %}<a href="{{ back_url }}" class="btn btn-sm btn-secondary">← Back</a>{% endif %}
+  </div>
+</div>
+
+{% if not tl.lines %}
+  <div class="card"><p>This plan has no scheduled activities to draw.</p></div>
+{% else %}
+
+{% set LEFT = 176 %}{% set TOP = 74 %}{% set ROWH = 76 %}{% set PXDAY = 26 %}{% set R = 7 %}
+{% set inner_w = LEFT + tl.axis_days * PXDAY + 96 %}
+{% set inner_h = TOP + tl.lines|length * ROWH + 30 %}
+
+<div class="tl-wrap">
+  <div class="tl-scroll">
+    <svg class="tl-svg" width="{{ inner_w }}" height="{{ inner_h }}"
+         viewBox="0 0 {{ inner_w }} {{ inner_h }}" role="img"
+         aria-label="Metro-map schedule timeline">
+
+      {# ── time axis: weekly gridlines + date labels ── #}
+      {% for g in tl.gridlines %}
+        {% set gx = LEFT + g.day * PXDAY %}
+        <line class="tl-grid" x1="{{ gx }}" y1="{{ TOP - 18 }}"
+              x2="{{ gx }}" y2="{{ inner_h - 16 }}"></line>
+        <text class="tl-gridlabel" x="{{ gx }}" y="{{ TOP - 24 }}"
+              text-anchor="middle">Day {{ g.day + 1 }}</text>
+        <text class="tl-gridlabel" x="{{ gx }}" y="{{ inner_h - 4 }}"
+              text-anchor="middle">{{ g.date[5:] }}</text>
+      {% endfor %}
+
+      {# ── one row per activity (metro line) ── #}
+      {% for line in tl.lines %}
+        {% set y = TOP + loop.index0 * ROWH %}
+        {% set first_x = LEFT + line.stations[0].day * PXDAY %}
+        {% set last_x = LEFT + line.stations[-1].day * PXDAY %}
+
+        {# line label (left gutter) #}
+        <text class="tl-linelabel" x="8" y="{{ y - 2 }}">{{ line.title|truncate(24, True, '…') }}</text>
+        <text class="tl-cadence" x="8" y="{{ y + 13 }}">{{ line.cadence }} · {{ line.concepts|length }} concept{{ '' if line.concepts|length == 1 else 's' }}</text>
+
+        {# solid track through stations #}
+        {% if last_x > first_x %}
+        <line x1="{{ first_x }}" y1="{{ y }}" x2="{{ last_x }}" y2="{{ y }}"
+              stroke="{{ line.color }}" stroke-width="5" stroke-linecap="round"></line>
+        {% endif %}
+
+        {# truncated tail → dashed continuation + ellipsis #}
+        {% if line.truncated %}
+          {% set tail_x = LEFT + tl.axis_days * PXDAY %}
+          <line x1="{{ last_x }}" y1="{{ y }}" x2="{{ tail_x + 8 }}" y2="{{ y }}"
+                stroke="{{ line.color }}" stroke-width="5" stroke-linecap="round"
+                stroke-dasharray="2 7" opacity="0.55"></line>
+          <text class="tl-ellipsis" x="{{ tail_x + 18 }}" y="{{ y + 7 }}"
+                fill="{{ line.color }}">…</text>
+          <title>Continues{% if line.bound_end_date %} until {{ line.bound_end_date }}{% else %} (no end date){% endif %}</title>
+        {% endif %}
+
+        {# stations #}
+        {% for s in line.stations %}
+          {% set cx = LEFT + s.day * PXDAY %}
+          <g class="tl-station" data-line="{{ line.index }}" data-date="{{ s.date }}"
+             data-label="{{ s.label }}" tabindex="0">
+            {% if s.terminus %}
+            <circle class="node" cx="{{ cx }}" cy="{{ y }}" r="{{ R + 2 }}"
+                    fill="{{ line.color }}" stroke="{{ line.color }}" stroke-width="3"></circle>
+            <circle cx="{{ cx }}" cy="{{ y }}" r="{{ R - 3 }}" fill="var(--card-bg)"></circle>
+            {% else %}
+            <circle class="node" cx="{{ cx }}" cy="{{ y }}" r="{{ R }}"
+                    fill="var(--card-bg)" stroke="{{ line.color }}" stroke-width="3"></circle>
+            {% endif %}
+            <text class="tl-stationlabel" x="{{ cx }}" y="{{ y - 13 }}">{{ s.label }}</text>
+          </g>
+        {% endfor %}
+      {% endfor %}
+    </svg>
+  </div>
+
+  <div class="tl-tip" id="tlTip" aria-hidden="true"></div>
+</div>
+
+{# static legend — full concept list per line (print / accessibility fallback) #}
+<div class="tl-legend">
+  {% for line in tl.lines %}
+  <div class="card">
+    <h4><span class="swatch" style="background:{{ line.color }}"></span>{{ line.title }}</h4>
+    <p class="tl-note">{{ line.cadence }}{% if line.endless %} · ongoing{% elif line.bound_end_date %} · until {{ line.bound_end_date }}{% endif %}</p>
+    {% if line.description %}<p class="tl-note">{{ line.description }}</p>{% endif %}
+    <ul>
+      {% for c in line.concepts %}
+      <li>
+        <span class="{{ 'req-required' if c.requirement == 'required' else 'req-optional' }}">
+          {{ c.name }}{% if c.requirement == 'required' %} *{% endif %}
+        </span>
+        {% if c.unit %}<span class="tl-unit">{{ c.unit }}</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var LINES = {{ lines_json | safe }};
+  var tip = document.getElementById('tlTip');
+  var wrap = document.querySelector('.tl-wrap');
+  if (!tip || !wrap) return;
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+
+  function render(line, date, label) {
+    var items = (line.concepts || []).map(function (c) {
+      var req = c.requirement === 'required'
+        ? '<span class="req-required">required</span>'
+        : '<span class="req-optional">optional</span>';
+      var unit = c.unit ? ' <span class="tl-unit">· ' + esc(c.unit) + '</span>' : '';
+      return '<li><span>' + esc(c.name) + unit + '</span>' + req + '</li>';
+    }).join('');
+    if (!items) items = '<li><span class="tl-unit">No concepts</span></li>';
+    var meta = esc(line.cadence) + ' · ' + esc(label) + (date ? ' · ' + esc(date) : '');
+    tip.innerHTML =
+      '<h4><span class="tl-dot" style="background:' + esc(line.color) + '"></span>' +
+      esc(line.title) + '</h4>' +
+      '<p class="tl-meta">' + meta + '</p>' +
+      '<ul>' + items + '</ul>';
+  }
+
+  function show(g, evt) {
+    var idx = parseInt(g.getAttribute('data-line'), 10);
+    var line = LINES[idx];
+    if (!line) return;
+    render(line, g.getAttribute('data-date'), g.getAttribute('data-label'));
+    tip.style.display = 'block';
+    position(g, evt);
+  }
+
+  function position(g, evt) {
+    var wrapRect = wrap.getBoundingClientRect();
+    var r = g.getBoundingClientRect();
+    // Anchor above the station; fall back below if it would clip the top.
+    var x = (r.left + r.right) / 2 - wrapRect.left;
+    var y = r.top - wrapRect.top;
+    var tw = tip.offsetWidth, th = tip.offsetHeight;
+    var left = x - tw / 2;
+    left = Math.max(4, Math.min(left, wrap.clientWidth - tw - 4));
+    var top = y - th - 12;
+    if (top < 0) top = y + 26;
+    tip.style.left = left + 'px';
+    tip.style.top = top + 'px';
+  }
+
+  function hide() { tip.style.display = 'none'; }
+
+  document.querySelectorAll('.tl-station').forEach(function (g) {
+    g.addEventListener('mouseenter', function (e) { show(g, e); });
+    g.addEventListener('mouseleave', hide);
+    g.addEventListener('focus', function (e) { show(g, e); });
+    g.addEventListener('blur', hide);
+  });
+})();
+</script>
+{% endblock %}

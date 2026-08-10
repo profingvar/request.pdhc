@@ -515,3 +515,8 @@ All edited files are noted here with full path, per Rule 17.
 - gateway/tests/test_reform_scope.py — NEW, 6 tests.
 - request.pdhc/gateway/docs/architecture.md (Port Allocation section)
 - gateway/app/api/auth.py (logout: redirect browser to /logged-out + kill SSO browser session; JSON preserved for API)
+- gateway/app/services/timeline_service.py (NEW — metro-map schedule builder: activities→lines, occurrences→stations, endless→first-month+ellipsis, bounds/period_end→terminus)
+- gateway/app/templates/service_requests/plan_timeline.html (NEW — SVG metro-map patient timeline; hover a station → concept list tooltip; per-line legend)
+- gateway/app/routes/service_requests.py (add timeline_view /service-requests/<guid>/timeline + plan_timeline_preview /plan-timeline/<plandef_guid>)
+- gateway/app/templates/service_requests/view.html (add "View Timeline" button on PlanDefinition card)
+- gateway/tests/test_timeline_service.py (NEW — 10 unit tests for the schedule builder)

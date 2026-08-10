@@ -1,0 +1,5 @@
+Patient timeline (metro map) added in request.pdhc:
+- /service-requests/<guid>/timeline  (SR snapshot, anchored at period_start, bounded by period_end)
+- /plan-timeline/<plandef_guid>       (PlanDefinition preview, anchored today, endless)
+Hover a station to see the concepts collected there. Endless recurrences draw the first month then "...".
+Next: deploy to request.pdhc.se (docker-compose up -d --build) then verify with the asthma plandef febf8ec1-1c2a-454e-ad42-0b294dc59493.

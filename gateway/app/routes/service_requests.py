@@ -6,6 +6,7 @@ from app.middleware.auth_middleware import requires_auth, requires_role
 from app.services import (
     service_request_service, patient_service,
     plan_definition_service, contract_service, form_service,
+    timeline_service,
 )
 from app.services.match_service import (
     find_and_create_matches, find_eligible_providers,
@@ -316,6 +317,82 @@ def view_detail(guid):
                            receipts=receipts, sr_forms=sr_forms, available_forms=available_forms,
                            contract_name=contract_name, contract_names=contract_names,
                            eligible_providers=eligible)
+
+
+def _timeline_lines_for_js(tl):
+    """Compact per-line payload for the metro-map hover tooltips (JS)."""
+    return [
+        {'index': l['index'], 'title': l['title'], 'color': l['color'],
+         'cadence': l['cadence'], 'concepts': l['concepts']}
+        for l in tl['lines']
+    ]
+
+
+@service_requests_web_bp.route('/service-requests/<guid>/timeline')
+@requires_auth
+def timeline_view(guid):
+    """Metro-map schedule timeline for a ServiceRequest's plan.
+
+    Draws the patient-specific snapshot (falling back to the live
+    PlanDefinition), anchored at the request's period_start and bounded by its
+    period_end. Endless recurrences show the first month, then a '…'.
+    """
+    import json
+    data, status = service_request_service.get_service_request(guid)
+    if status != 200:
+        flash('ServiceRequest not found', 'danger')
+        return redirect(url_for('service_requests_web.list_view'))
+
+    snapshot = dict(data.get('plan_definition_snapshot') or {})
+    activities = snapshot.get('activities')
+    if not activities and data.get('plan_definition_guid'):
+        pd, st = plan_definition_service.get_plan_definition(
+            data['plan_definition_guid'])
+        if st == 200 and isinstance(pd, dict):
+            activities = pd.get('activities') or []
+            snapshot.setdefault('title', pd.get('title') or pd.get('name'))
+    activities = activities or []
+
+    tl = timeline_service.build_timeline(
+        activities,
+        start_date=data.get('period_start'),
+        end_date=data.get('period_end'),
+    )
+    plan_title = snapshot.get('title') or snapshot.get('name') or 'PlanDefinition'
+    return render_template(
+        'service_requests/plan_timeline.html',
+        tl=tl,
+        lines_json=json.dumps(_timeline_lines_for_js(tl)),
+        plan_title=plan_title,
+        patient_label=(data.get('patient_guid') or '')[:8] or None,
+        back_url=url_for('service_requests_web.view_detail', guid=guid),
+    )
+
+
+@service_requests_web_bp.route('/plan-timeline/<plandef_guid>')
+@requires_auth
+def plan_timeline_preview(plandef_guid):
+    """Metro-map preview of a PlanDefinition's schedule (no patient/SR).
+
+    Anchored at today; recurrences are treated as endless unless the plan
+    itself bounds the activity (count/duration).
+    """
+    import json
+    pd, st = plan_definition_service.get_plan_definition(plandef_guid)
+    if st != 200 or not isinstance(pd, dict):
+        flash('PlanDefinition not found', 'danger')
+        return redirect(url_for('service_requests_web.create_view'))
+    activities = pd.get('activities') or []
+    tl = timeline_service.build_timeline(activities)
+    plan_title = pd.get('title') or pd.get('name') or 'PlanDefinition'
+    return render_template(
+        'service_requests/plan_timeline.html',
+        tl=tl,
+        lines_json=json.dumps(_timeline_lines_for_js(tl)),
+        plan_title=plan_title,
+        patient_label=None,
+        back_url=request.referrer or url_for('service_requests_web.create_view'),
+    )
 
 
 @service_requests_web_bp.route('/service-requests/<guid>/edit-plan', methods=['GET', 'POST'])

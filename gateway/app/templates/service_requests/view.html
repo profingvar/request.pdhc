@@ -53,6 +53,7 @@
     <p style="font-size:0.85rem;">{{ snap.get('description', '')[:200] }}</p>
     {% endif %}
     <p style="font-size:0.85rem; color:var(--text-secondary);">GUID: {{ sr.plan_definition_guid }}</p>
+    <a href="{{ url_for('service_requests_web.timeline_view', guid=sr.guid) }}" class="btn btn-sm btn-secondary"><i data-lucide="git-branch" style="width:0.9rem;height:0.9rem"></i> View Timeline</a>
     {% if sr.status == 'draft' %}
     <a href="{{ url_for('service_requests_web.edit_plan', guid=sr.guid) }}" class="btn btn-sm btn-secondary">Edit Snapshot</a>
     {% endif %}
