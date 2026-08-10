@@ -522,3 +522,6 @@ All edited files are noted here with full path, per Rule 17.
 - gateway/tests/test_timeline_service.py (NEW — 10 unit tests for the schedule builder)
 - gateway/app/templates/service_requests/create.html ("Preview schedule timeline ↗" link → /plan-timeline/<guid>, shown once a PlanDefinition is selected)
 - progress.md (Patient timeline metro-map section, 2026-08-10)
+- gateway/app/services/ips_client.py (spärr auth fix: Authorization: ApiKey + /blocks/check predicate; was X-API-Key + clinic-gated /blocks list → always 401 → filter failed open)
+- gateway/app/services/service_request_service.py (callers use check-based is_sr_visible(sr) / filter_visible_srs(items))
+- gateway/tests/test_blocks_filter.py (rewritten for the check-based API; 17 tests incl. transport header assertion)

@@ -172,8 +172,7 @@ def get_service_request(guid):
     sr = ServiceRequest.query.filter_by(guid=guid).first()
     if not sr:
         return {'code': 'not_found', 'message': 'ServiceRequest not found'}, 404
-    blocks = ips_client.get_active_blocks(sr.patient_guid)
-    if not ips_client.is_sr_visible(sr, blocks):
+    if not ips_client.is_sr_visible(sr):
         return {'code': 'not_found', 'message': 'ServiceRequest not found'}, 404
     return sr.to_dict(), 200
 
@@ -204,9 +203,8 @@ def list_service_requests(user_guid=None, org_guid=None, is_su_admin=False,
     # page cap; the caller should treat per_page as a soft upper bound.
     items = query.offset((page - 1) * per_page).limit(per_page).all()
     if items:
-        patient_guids = {sr.patient_guid for sr in items if sr.patient_guid}
-        blocks_by_patient = ips_client.fetch_blocks_for_patients(patient_guids)
-        items = ips_client.filter_visible_srs(items, blocks_by_patient)
+        # One cached ips /blocks/check per unique (patient, requester_org).
+        items = ips_client.filter_visible_srs(items)
     # Total uses an unfiltered count for pagination math — exposing
     # the blocked count would itself leak "the patient has blocks";
     # the page is smaller than total when spärr fires, which is the
