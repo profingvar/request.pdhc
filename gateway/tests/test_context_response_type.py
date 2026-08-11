@@ -61,6 +61,26 @@ class TestHeuristicFallback:
             assert cs._infer_response_type(_tx(range_min=1, range_max=5)) == "categorical"
 
 
+class TestUnitResolution:
+    def test_extract_transactions_resolves_unit_from_plan(self):
+        # #559: snapshot drops unit; resolve it (and response_type) from plan.
+        snapshot = {"goals": [], "activities": [
+            {"transactions": [{"guid": "t1", "concept_guid": FEV1}]}]}
+        with patch.object(cs, "_plan_concept_units", return_value={FEV1: "L"}), \
+             patch.object(cs, "_plan_concept_response_types", return_value={FEV1: "numeric"}):
+            txns = cs._extract_transactions(snapshot)
+        assert txns[0]["unit"] == "L"
+        assert txns[0]["response_type"] == "numeric"
+
+    def test_snapshot_unit_wins_over_plan(self):
+        snapshot = {"goals": [], "activities": [
+            {"transactions": [{"guid": "t1", "concept_guid": FEV1, "unit": "mL"}]}]}
+        with patch.object(cs, "_plan_concept_units", return_value={FEV1: "L"}), \
+             patch.object(cs, "_plan_concept_response_types", return_value={}):
+            txns = cs._extract_transactions(snapshot)
+        assert txns[0]["unit"] == "mL"
+
+
 class TestVocabMap:
     def test_all_plan_types_map(self):
         m = cs._PLAN_RT_TO_GATEWAY

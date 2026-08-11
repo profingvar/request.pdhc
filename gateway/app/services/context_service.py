@@ -20,53 +20,69 @@ _PLAN_RT_TO_GATEWAY = {
     'text': 'text',
 }
 
-# Cache of {concept_guid: gateway_response_type}, refreshed from plan.pdhc.
-_rt_cache = {'ts': 0.0, 'by_concept': {}}
-_RT_TTL = 300.0
+# Cache of concept->response_type and concept->unit_name, from one plan.pdhc
+# fetch. The SR snapshot carries neither, so both are resolved live (#559).
+_plan_cache = {'ts': 0.0, 'rt': {}, 'unit': {}}
+_PLAN_TTL = 300.0
+
+
+def _unlist(payload):
+    return payload.get('items', payload) if isinstance(payload, dict) else payload
+
+
+def _refresh_plan_maps():
+    """Populate ``_plan_cache['rt']`` ({concept_guid: gateway_response_type})
+    and ``['unit']`` ({concept_guid: unit_name}) from plan.pdhc.
+
+    plan.pdhc is the authority on a concept's response_type + unit; the SR
+    snapshot carries neither. concept -> response_type_guid/unit_guid -> name.
+    Terminology endpoints are public-read. Cached ``_PLAN_TTL`` s; on any
+    failure keeps the last good maps (stale-if-error) so a plan.pdhc blip
+    doesn't regress every concept to 'text'/no-unit.
+    """
+    now = time.monotonic()
+    if _plan_cache['rt'] and (now - _plan_cache['ts']) < _PLAN_TTL:
+        return
+    base = (current_app.config.get('PLAN_BASE_URL') or '').rstrip('/')
+    if not base:
+        return
+    try:
+        h = {'Accept': 'application/json'}
+        rt = requests.get(f'{base}/api/v1/lookup/response-types', headers=h, timeout=6)
+        un = requests.get(f'{base}/api/v1/lookup/units', headers=h, timeout=6)
+        cc = requests.get(f'{base}/api/v1/concepts', params={'per_page': '1000'},
+                          headers=h, timeout=8)
+        for r in (rt, un, cc):
+            r.raise_for_status()
+        rt_name = {r.get('guid'): (r.get('response_type_name') or '')
+                   for r in _unlist(rt.json())}
+        unit_name = {u.get('guid'): (u.get('unit_name') or '')
+                     for u in _unlist(un.json())}
+        rt_map, unit_map = {}, {}
+        for c in _unlist(cc.json()):
+            cg = c.get('guid')
+            if not cg:
+                continue
+            mapped = _PLAN_RT_TO_GATEWAY.get(rt_name.get(c.get('response_type'), '').strip().lower())
+            if mapped:
+                rt_map[cg] = mapped
+            u = unit_name.get(c.get('unit'))
+            if u:
+                unit_map[cg] = u
+        if rt_map or unit_map:
+            _plan_cache.update(rt=rt_map, unit=unit_map, ts=now)
+    except (requests.RequestException, ValueError, KeyError, TypeError):
+        return  # keep stale maps
 
 
 def _plan_concept_response_types():
-    """Resolve ``{concept_guid: gateway_response_type}`` from plan.pdhc.
+    _refresh_plan_maps()
+    return _plan_cache['rt']
 
-    plan.pdhc is the authority on a concept's response_type; the SR snapshot
-    does not carry it, so we resolve concept -> response_type_guid -> name ->
-    gateway vocab. The terminology endpoints are public-read. Cached for
-    ``_RT_TTL`` seconds; on any failure returns the last good map (stale-if-
-    error) so a plan.pdhc blip doesn't regress every concept to 'text'.
-    """
-    now = time.monotonic()
-    if _rt_cache['by_concept'] and (now - _rt_cache['ts']) < _RT_TTL:
-        return _rt_cache['by_concept']
-    base = (current_app.config.get('PLAN_BASE_URL') or '').rstrip('/')
-    if not base:
-        return _rt_cache['by_concept']
-    try:
-        h = {'Accept': 'application/json'}
-        rt = requests.get(f'{base}/api/v1/lookup/response-types',
-                          headers=h, timeout=6)
-        cc = requests.get(f'{base}/api/v1/concepts',
-                          params={'per_page': '1000'}, headers=h, timeout=8)
-        rt.raise_for_status()
-        cc.raise_for_status()
-        rt_items = rt.json()
-        rt_items = rt_items.get('items', rt_items) if isinstance(rt_items, dict) else rt_items
-        rt_name = {r.get('guid'): (r.get('response_type_name') or '')
-                   for r in rt_items}
-        cc_items = cc.json()
-        cc_items = cc_items.get('items', cc_items) if isinstance(cc_items, dict) else cc_items
-        by_concept = {}
-        for c in cc_items:
-            cg = c.get('guid')
-            name = rt_name.get(c.get('response_type'), '')
-            mapped = _PLAN_RT_TO_GATEWAY.get(name.strip().lower())
-            if cg and mapped:
-                by_concept[cg] = mapped
-        if by_concept:
-            _rt_cache['by_concept'] = by_concept
-            _rt_cache['ts'] = now
-        return by_concept
-    except (requests.RequestException, ValueError, KeyError, TypeError):
-        return _rt_cache['by_concept']
+
+def _plan_concept_units():
+    _refresh_plan_maps()
+    return _plan_cache['unit']
 
 
 def get_sr_context(sr_guid):
@@ -190,7 +206,9 @@ def _extract_transactions(snapshot):
                 'goal_guid': tx.get('goal_guid') or activity_goal_guid,
                 'goal_concept_guid': tx.get('goal_concept_guid') or activity_goal_concept,
                 'goal_concept_name': tx.get('goal_concept_name') or activity_goal_concept_name,
-                'unit': tx.get('unit'),
+                # unit resolved from plan.pdhc (#559 — snapshot drops it), so the
+                # gateway stamps value_unit; snapshot value wins if it has one.
+                'unit': tx.get('unit') or _plan_concept_units().get(tx.get('concept_guid')),
                 'unit_display': tx.get('unit_display', ''),
                 'expected_value': tx.get('expected_value'),
                 'range_min': tx.get('range_min'),

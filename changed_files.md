@@ -530,3 +530,5 @@ All edited files are noted here with full path, per Rule 17.
 - gateway/tests/test_consent_at_dispatch.py (updated cache tests for per-grantee API + TestConsentTransport)
 - gateway/app/services/context_service.py (_infer_response_type now resolves the concept's real response_type from plan.pdhc (authority) + vocab map, heuristic fallback; fixes numeric concepts (FEV1/spo2/peak-flow) being mis-typed 'text' → provider 422)
 - gateway/tests/test_context_response_type.py (NEW — 7 tests: plan-authoritative resolution + heuristic fallback + vocab map)
+- gateway/app/services/context_service.py (#559: also resolve concept unit from plan.pdhc /lookup/units → transaction.unit → gateway stamps value_unit; was empty)
+- gateway/tests/test_context_response_type.py (+2 unit-resolution tests)
