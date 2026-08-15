@@ -139,6 +139,7 @@ def create_app(testing=False):
             'status': status,
             'database': 'connected' if db_ok else 'unavailable',
             'service': 'request.pdhc',
+            'version': os.environ.get('APP_VERSION', 'dev'),
         })
         # Ticket #70 / CLAUDE.md §10: let www.pdhc.se/services.html read the
         # JSON body cross-origin so it can drive real status/DB dots. Specific

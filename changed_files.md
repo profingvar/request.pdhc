@@ -532,3 +532,8 @@ All edited files are noted here with full path, per Rule 17.
 - gateway/tests/test_context_response_type.py (NEW — 7 tests: plan-authoritative resolution + heuristic fallback + vocab map)
 - gateway/app/services/context_service.py (#559: also resolve concept unit from plan.pdhc /lookup/units → transaction.unit → gateway stamps value_unit; was empty)
 - gateway/tests/test_context_response_type.py (+2 unit-resolution tests)
+
+- gateway/app/services/context_service.py — paginate the plan.pdhc /concepts fetch (was single per_page=1000 → silently clamped to 200; would drop unit/response-type resolution past 200 concepts). Deployed 2026-08-15 (request_pdhc_app rebuild).
+
+- gateway/app/__init__.py — health adds `version` (§10). gateway/app/api/service_requests.py — clamp per_page at 200. .env APP_VERSION=b0247a6. Deployed 2026-08-15 (request_pdhc_app rebuild).
+- gateway/app/services/ips_client.py — escalate spärr fail-open branches (network + >=400, not 404) to logger.error with SPARR_FAIL_OPEN marker for alerting. Deployed 2026-08-15.

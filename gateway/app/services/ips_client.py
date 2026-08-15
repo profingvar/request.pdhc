@@ -95,17 +95,22 @@ class IpsClient:
                 url, params={"source_clinic_id": source_clinic_id},
                 headers=self._headers(), timeout=self.timeout,
             )
-        except requests.RequestException:
-            current_app.logger.warning(
-                "ips block check failed (network) for %s", patient_guid[:12],
+        except requests.RequestException as e:
+            # Fail-OPEN on a real IPS outage (blocked SRs stay visible). Log at
+            # ERROR with a greppable marker so monitoring can alert — an IPS
+            # outage silently widens spärr visibility (PDL Ch 4 §4).
+            current_app.logger.error(
+                "SPARR_FAIL_OPEN ips block check network error for %s: %s",
+                patient_guid[:12], e,
             )
             return (False, [])
         if r.status_code == 404:
-            # Patient not known to ips → no blocks.
+            # Patient not known to ips → genuinely no blocks (not an outage).
             return (False, [])
         if r.status_code >= 400:
-            current_app.logger.warning(
-                "ips block check %s -> %s", patient_guid[:12], r.status_code
+            current_app.logger.error(
+                "SPARR_FAIL_OPEN ips block check %s -> %s",
+                patient_guid[:12], r.status_code,
             )
             return (False, [])
         payload = r.json() or {}

@@ -50,16 +50,34 @@ def _refresh_plan_maps():
         h = {'Accept': 'application/json'}
         rt = requests.get(f'{base}/api/v1/lookup/response-types', headers=h, timeout=6)
         un = requests.get(f'{base}/api/v1/lookup/units', headers=h, timeout=6)
-        cc = requests.get(f'{base}/api/v1/concepts', params={'per_page': '1000'},
-                          headers=h, timeout=8)
-        for r in (rt, un, cc):
-            r.raise_for_status()
+        rt.raise_for_status()
+        un.raise_for_status()
+        # Concepts are paginated and server-capped at per_page=200; loop until
+        # `total` is consumed. A single page silently drops every concept past
+        # the cap, which would regress their unit/response-type to none once
+        # plan.pdhc grows beyond one page (the value_unit class of bug).
+        concepts = []
+        page = 1
+        while True:
+            cc = requests.get(f'{base}/api/v1/concepts',
+                              params={'per_page': '200', 'page': str(page)},
+                              headers=h, timeout=8)
+            cc.raise_for_status()
+            body = cc.json()
+            batch = _unlist(body)
+            concepts.extend(batch)
+            total = body.get('total') if isinstance(body, dict) else None
+            if (len(batch) < 200
+                    or (total is not None and len(concepts) >= total)
+                    or page >= 50):  # 10k-concept backstop
+                break
+            page += 1
         rt_name = {r.get('guid'): (r.get('response_type_name') or '')
                    for r in _unlist(rt.json())}
         unit_name = {u.get('guid'): (u.get('unit_name') or '')
                      for u in _unlist(un.json())}
         rt_map, unit_map = {}, {}
-        for c in _unlist(cc.json()):
+        for c in concepts:
             cg = c.get('guid')
             if not cg:
                 continue
