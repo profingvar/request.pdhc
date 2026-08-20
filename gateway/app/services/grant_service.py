@@ -121,27 +121,45 @@ def validate_grant_detailed(service_request_guid, patient_guid, provider_org_gui
     if contract_guid:
         filters['contract_guid'] = contract_guid
 
-    grant = DataExchangeGrant.query.filter_by(**filters).first()
-    if not grant:
+    def _expired(g):
+        if not g.expires_at:
+            return False
+        exp = g.expires_at if g.expires_at.tzinfo else g.expires_at.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) > exp
+
+    # An SR accumulates several grant rows over its life — every
+    # re-dispatch issues a FRESH grant. Match the SPECIFIC token the
+    # caller presented (newest first) rather than an arbitrary .first():
+    # the old code grabbed the oldest row, which after a re-dispatch is
+    # the already-expired one, and returned 'expired' even though a fresh
+    # valid grant existed for the same SR.
+    grants = (DataExchangeGrant.query.filter_by(**filters)
+              .order_by(DataExchangeGrant.created_at.desc()).all())
+    if not grants:
         return None, 'not_found'
+
+    grant = next(
+        (g for g in grants if hmac.compare_digest(g.grant_token, grant_token)),
+        None,
+    )
+    if grant is None:
+        # The presented token matches no grant row for this SR. Report the
+        # most informative reason from the newest row.
+        newest = grants[0]
+        if newest.revoked:
+            return None, 'revoked'
+        if _expired(newest):
+            return None, 'expired'
+        return None, 'invalid_token'
 
     if grant.revoked:
         return None, 'revoked'
-
-    # Expiry check, split out so callers can map to GRANT_EXPIRED specifically
-    if grant.expires_at:
-        exp = grant.expires_at if grant.expires_at.tzinfo else grant.expires_at.replace(tzinfo=timezone.utc)
-        if datetime.now(timezone.utc) > exp:
-            return None, 'expired'
-
+    if _expired(grant):
+        return None, 'expired'
     if not grant.is_valid():
         return None, 'invalid_token'
-
     if grant.patient_guid != patient_guid:
         return None, 'patient_mismatch'
-
-    if not hmac.compare_digest(grant.grant_token, grant_token):
-        return None, 'invalid_token'
 
     return grant, 'valid'
 
