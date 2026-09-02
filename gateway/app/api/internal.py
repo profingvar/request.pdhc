@@ -176,3 +176,21 @@ def auto_provision_pat():
         }), 201
 
     return jsonify({'error': 'pat_creation_failed', 'detail': result}), 500
+
+
+@internal_bp.route('/internal/service-request/<sr_guid>/complete', methods=['POST'])
+@requires_service_key
+def mark_sr_complete(sr_guid):
+    """Auto-close: flip this SR's provider contract-match to 'completed'.
+
+    Called by gateway.pdhc once an accepted provider report marks the SR
+    completed, so the provider feed reflects clinical completion rather than
+    only the distribution status ('sent'). Idempotent; service-key
+    authenticated. 404 if the SR is unknown (gateway tolerates it).
+    """
+    from app.services.completion_service import mark_service_request_completed
+
+    result, code = mark_service_request_completed(
+        sr_guid, source='gateway.pdhc', ip_address=request.remote_addr,
+    )
+    return jsonify(result), code

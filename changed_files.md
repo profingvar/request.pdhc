@@ -537,3 +537,8 @@ All edited files are noted here with full path, per Rule 17.
 
 - gateway/app/__init__.py — health adds `version` (§10). gateway/app/api/service_requests.py — clamp per_page at 200. .env APP_VERSION=b0247a6. Deployed 2026-08-15 (request_pdhc_app rebuild).
 - gateway/app/services/ips_client.py — escalate spärr fail-open branches (network + >=400, not 404) to logger.error with SPARR_FAIL_OPEN marker for alerting. Deployed 2026-08-15.
+
+## 2026-09-02T11:45:22Z — auto-close: propagate gateway completion → request feed
+- request.pdhc/gateway/app/services/completion_service.py (new) — mark_service_request_completed()
+- request.pdhc/gateway/app/api/internal.py — POST /internal/service-request/<sr>/complete (service-key)
+- request.pdhc/gateway/tests/test_auto_complete.py (new)
