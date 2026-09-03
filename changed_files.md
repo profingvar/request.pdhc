@@ -542,3 +542,8 @@ All edited files are noted here with full path, per Rule 17.
 - request.pdhc/gateway/app/services/completion_service.py (new) — mark_service_request_completed()
 - request.pdhc/gateway/app/api/internal.py — POST /internal/service-request/<sr>/complete (service-key)
 - request.pdhc/gateway/tests/test_auto_complete.py (new)
+
+## 2026-09-03 — patient demographics into SR context (ips → gateway → CDR1)
+- gateway/app/services/context_service.py — resolve patient name/birthDate from ips into get_sr_context (fail-soft)
+- gateway/tests/test_context_demographics.py (new)
+Deployed to prod (surgical, checksum-verified). Enables cd-assist patient list to show names.
