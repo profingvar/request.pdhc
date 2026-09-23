@@ -547,3 +547,14 @@ All edited files are noted here with full path, per Rule 17.
 - gateway/app/services/context_service.py — resolve patient name/birthDate from ips into get_sr_context (fail-soft)
 - gateway/tests/test_context_demographics.py (new)
 Deployed to prod (surgical, checksum-verified). Enables cd-assist patient list to show names.
+
+## 2026-09-23 — tickets #583 (concept definition) + #582 (archiving)
+/Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/context_service.py
+/Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/service_request_service.py
+/Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/api/care_plans.py
+/Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/provider_feed_service.py
+/Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/api/provider.py
+/Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/completion_service.py
+/Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_concept_definition_snapshot.py   (new)
+/Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_auto_archive_on_completion.py    (new)
+/Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_provider_feed_archived.py        (rewritten for #582)

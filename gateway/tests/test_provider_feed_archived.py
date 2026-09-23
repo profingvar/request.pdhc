@@ -1,6 +1,13 @@
-"""Tests for ticket #90 — archived SRs remain searchable/downloadable
-from the provider feed, and the feed exposes period_end so providers
-know the submission cutoff.
+"""Archived ServiceRequests — feed exposure and downloadability.
+
+Ticket #90 made archived SRs both listable AND downloadable so a provider
+could still submit late, past period_end.
+
+Ticket #582 SUPERSEDES #90 on the listing half only: an archived request
+must not stay *actively exposed* to providers as if it were open work, so it
+is dropped from the feed unless explicitly asked for. The half of #90 that
+carries the clinical value — a provider that already holds the request can
+still download it and submit late — is unchanged and asserted below.
 """
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -43,9 +50,10 @@ def _mk_match(sr, provider_guid, match_status='sent'):
     return match
 
 
-class TestFeedIncludesArchived:
+class TestArchivedNotActivelyExposed:
+    """#582: archived is out of the feed by default, in on request."""
 
-    def test_archived_sr_appears_in_feed(self, app):
+    def test_archived_sr_absent_from_feed_by_default(self, app):
         provider_guid = str(uuid.uuid4())
         with app.app_context():
             past = datetime.now(timezone.utc) - timedelta(days=1)
@@ -58,9 +66,9 @@ class TestFeedIncludesArchived:
             )
             assert status == 200
             guids = [item['service_request_guid'] for item in data['items']]
-            assert sr.guid in guids
+            assert sr.guid not in guids
 
-    def test_feed_entry_exposes_period_end_and_sr_status(self, app):
+    def test_archived_sr_returned_when_explicitly_included(self, app):
         provider_guid = str(uuid.uuid4())
         with app.app_context():
             past = datetime.now(timezone.utc) - timedelta(hours=3)
@@ -70,10 +78,24 @@ class TestFeedIncludesArchived:
 
             data, _ = provider_feed_service.list_for_provider(
                 provider_org_guid=provider_guid,
+                include_archived=True,
             )
             entry = next(i for i in data['items'] if i['service_request_guid'] == sr.guid)
             assert entry['sr_status'] == 'archived'
             assert entry['period_end'] is not None
+
+    def test_active_sr_unaffected_by_the_default(self, app):
+        provider_guid = str(uuid.uuid4())
+        with app.app_context():
+            sr = _mk_sr('active')
+            _mk_match(sr, provider_guid, match_status='sent')
+            db.session.commit()
+
+            data, _ = provider_feed_service.list_for_provider(
+                provider_org_guid=provider_guid,
+            )
+            guids = [item['service_request_guid'] for item in data['items']]
+            assert sr.guid in guids
 
     def test_draft_sr_still_excluded_from_feed(self, app):
         provider_guid = str(uuid.uuid4())

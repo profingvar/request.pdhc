@@ -858,3 +858,62 @@ the destination caregiver through. `consent_covers_dispatch` logic unchanged.
 ips suite 402 green; request suite 188 green. Both deployed 2026-08-10; verified
 live: the deployed request client → deployed ips `/consents/check` returns 404
 (patient absent) instead of 401 — auth now passes.
+
+---
+
+## 2026-09-23 — #583 concept definition on the request, #582 archiving
+
+**#583 — the request now carries each concept's full definition.**
+plan.pdhc holds `response_type` and `unit` on the *concept*, not the
+transaction, so a captured PlanDefinition snapshot carried neither and every
+consumer had to call plan.pdhc back to interpret an observation
+(`_infer_response_type`, and #559 for unit). Two consequences: a stored request
+could not be read without a live plan.pdhc, and editing a concept later
+silently changed how an already-captured request was interpreted.
+
+`context_service.enrich_snapshot_concepts()` now stamps `response_type`
+(gateway vocab), `response_type_name` (plan.pdhc's own name — "Numerical",
+"Single choice"; this is what #583 literally asked for) and `unit` into the
+snapshot at capture time, at both capture points: ServiceRequest creation
+(`service_request_service.py:91`) and CarePlan creation (`care_plans.py:81`).
+`_infer_response_type` now PREFERS what the snapshot carries over the live
+lookup, so interpretation cannot drift. Never overwrites a value the snapshot
+already has; a no-op if plan.pdhc is unreachable, so it can only add
+information. Live resolution stays as the fallback for older snapshots.
+
+**#582 — archiving.** Two halves:
+1. *Not actively exposed.* `provider_feed_service.list_for_provider()` now
+   excludes archived SRs by default, with `include_archived` (and
+   `?include_archived=1` on `/api/v1/provider/feed`) to opt back in. This
+   SUPERSEDES #90 on the listing point only — #90's clinical value, a provider
+   submitting late past `period_end`, is served by `download_bundle`, which
+   still accepts `archived` and is unchanged.
+2. *Auto-archive on provider completion.*
+   `completion_service.archive_if_provider_work_complete()` archives an
+   `active` SR once EVERY `ServiceRequestContractMatch` is terminal
+   (completed/rejected). One provider finishing is deliberately not enough: an
+   SR can be matched to several providers and archiving early would pull live
+   work out of another provider's feed. Called from
+   `mark_service_request_completed` (the gateway clinical-completion path).
+   Audited as `servicerequest.auto_archived`.
+
+**Known gap, recorded not fixed:** `request_feed_service.update_provider_status`
+also takes a provider `completed`, but `DispatchRequest` has no
+`service_request_guid` — it links only to `plan_definition_guid` + provider —
+so that path cannot reach a ServiceRequest to archive it. Auto-archive
+therefore fires only via the gateway completion path. Closing that needs a link
+column on `DispatchRequest`; raise a ticket if the dispatch feed is still in use.
+
+**Tests:** 226 passed, up from 207. New: `test_concept_definition_snapshot.py`
+(11), `test_auto_archive_on_completion.py` (7). `test_provider_feed_archived.py`
+rewritten to encode the new #582 contract while still asserting #90's download
+guarantee.
+
+**Pre-existing failure, NOT caused by this work:** the 3 `test_blocks_filter.py`
+`TestServiceLayer` tests fail in a full run and pass in isolation (17/17). They
+assert `data["total"] == 2` against an admin-wide list and see SRs leaked by
+earlier tests. Present at baseline before any change here. Test-hygiene defect,
+not a product bug — worth its own ticket.
+
+**NOT COMMITTED:** git is blocked on this machine (macOS 27 Xcode licence, see
+the simprovider note). All of the above is on disk only.

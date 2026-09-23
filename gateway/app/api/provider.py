@@ -24,11 +24,17 @@ def feed():
 
     since = request.args.get('since')
     limit = min(int(request.args.get('limit', 50)), 200)
+    # #582: archived SRs are not actively exposed; a provider reconciling
+    # its own backlog can still opt in.
+    include_archived = request.args.get('include_archived', '').lower() in (
+        '1', 'true', 'yes',
+    )
 
     data, status = list_for_provider(
         provider_org_guid=g.provider_org_guid,
         since=since,
         limit=limit,
+        include_archived=include_archived,
     )
 
     log_event(

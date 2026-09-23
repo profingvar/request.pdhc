@@ -26,7 +26,13 @@ _PLAN_RT_TO_GATEWAY = {
 
 # Cache of concept->response_type and concept->unit_name, from one plan.pdhc
 # fetch. The SR snapshot carries neither, so both are resolved live (#559).
-_plan_cache = {'ts': 0.0, 'rt': {}, 'unit': {}}
+# gateway ObservationValidator's accepted vocab — the values _PLAN_RT_TO_GATEWAY
+# maps into, plus the two the validator accepts that plan has no name for.
+_GATEWAY_RESPONSE_TYPES = frozenset(
+    {'numeric', 'categorical', 'text', 'boolean', 'dateTime', 'graph'}
+)
+
+_plan_cache = {'ts': 0.0, 'rt': {}, 'rt_name': {}, 'unit': {}}
 _PLAN_TTL = 300.0
 
 
@@ -80,19 +86,26 @@ def _refresh_plan_maps():
                    for r in _unlist(rt.json())}
         unit_name = {u.get('guid'): (u.get('unit_name') or '')
                      for u in _unlist(un.json())}
-        rt_map, unit_map = {}, {}
+        rt_map, rt_name_map, unit_map = {}, {}, {}
         for c in concepts:
             cg = c.get('guid')
             if not cg:
                 continue
-            mapped = _PLAN_RT_TO_GATEWAY.get(rt_name.get(c.get('response_type'), '').strip().lower())
+            plan_rt = rt_name.get(c.get('response_type'), '').strip()
+            mapped = _PLAN_RT_TO_GATEWAY.get(plan_rt.lower())
             if mapped:
                 rt_map[cg] = mapped
+            # plan.pdhc's own name ("Numerical", "Single choice", ...) is kept
+            # verbatim as well: #583 wants the concept's full definition on the
+            # request, not only the gateway-vocab reduction of it.
+            if plan_rt:
+                rt_name_map[cg] = plan_rt
             u = unit_name.get(c.get('unit'))
             if u:
                 unit_map[cg] = u
-        if rt_map or unit_map:
-            _plan_cache.update(rt=rt_map, unit=unit_map, ts=now)
+        if rt_map or unit_map or rt_name_map:
+            _plan_cache.update(rt=rt_map, rt_name=rt_name_map,
+                               unit=unit_map, ts=now)
     except (requests.RequestException, ValueError, KeyError, TypeError):
         return  # keep stale maps
 
@@ -105,6 +118,73 @@ def _plan_concept_response_types():
 def _plan_concept_units():
     _refresh_plan_maps()
     return _plan_cache['unit']
+
+
+def _plan_concept_response_type_names():
+    _refresh_plan_maps()
+    return _plan_cache['rt_name']
+
+
+def enrich_snapshot_concepts(snapshot):
+    """Stamp each transaction in a PlanDefinition snapshot with the full
+    concept definition, at capture time (#583).
+
+    plan.pdhc's plandef payload names a concept but not what kind of answer
+    it takes: ``response_type`` and ``unit`` live on the *concept*, not on the
+    transaction, so a stored snapshot has historically carried neither. Every
+    consumer therefore had to call back to plan.pdhc to interpret an
+    observation (see ``_infer_response_type`` and #559), which makes the
+    request depend on a live service and lets the interpretation of an old
+    request drift when a concept is later edited.
+
+    This writes the definition *into* the snapshot instead, so the stored
+    ServiceRequest is self-describing:
+
+        response_type        gateway vocab  — numeric | categorical | text |
+                                              boolean | dateTime | graph
+        response_type_name   plan.pdhc's own name — "Numerical", "Single
+                                              choice", ... (what #583 asks for)
+        unit                 unit name, e.g. "L", "mmol/mol"
+
+    Values already present in the snapshot are never overwritten — plan.pdhc
+    is the fallback, not the authority, once a request has been captured.
+    Mutates and returns ``snapshot``. Never raises: if plan.pdhc is
+    unreachable the snapshot is stored unenriched and the existing runtime
+    resolution still applies, so this can only add information.
+    """
+    if not isinstance(snapshot, dict):
+        return snapshot
+    try:
+        rt_map = _plan_concept_response_types()
+        rt_name_map = _plan_concept_response_type_names()
+        unit_map = _plan_concept_units()
+    except Exception:  # pragma: no cover - defensive, _refresh already guards
+        return snapshot
+    if not (rt_map or rt_name_map or unit_map):
+        return snapshot
+
+    for activity in snapshot.get('activities') or []:
+        if not isinstance(activity, dict):
+            continue
+        for tx in activity.get('transactions') or []:
+            if not isinstance(tx, dict):
+                continue
+            concept_guid = tx.get('concept_guid')
+            if not concept_guid:
+                continue
+            if not tx.get('response_type'):
+                mapped = rt_map.get(concept_guid)
+                if mapped:
+                    tx['response_type'] = mapped
+            if not tx.get('response_type_name'):
+                plan_name = rt_name_map.get(concept_guid)
+                if plan_name:
+                    tx['response_type_name'] = plan_name
+            if not tx.get('unit'):
+                unit = unit_map.get(concept_guid)
+                if unit:
+                    tx['unit'] = unit
+    return snapshot
 
 
 def _human_name(fhir_patient):
@@ -202,6 +282,14 @@ def _infer_response_type(tx):
     (FEV1, spo2, peak-flow …) — the validator then 422'd every numeric
     reading a provider submitted.
     """
+    # #583: an enriched snapshot carries the concept's response_type at
+    # capture time. Prefer it — a captured request describes itself, and a
+    # later edit to the concept in plan.pdhc must not retro-change how an
+    # old request is interpreted. Live lookup stays as the fallback for
+    # snapshots captured before enrichment existed.
+    own = (tx.get('response_type') or '').strip()
+    if own in _GATEWAY_RESPONSE_TYPES:
+        return own
     concept_guid = tx.get('concept_guid')
     if concept_guid:
         resolved = _plan_concept_response_types().get(concept_guid)
@@ -281,6 +369,16 @@ def _extract_transactions(snapshot):
                 'range_max': tx.get('range_max'),
                 'requirement_type': tx.get('requirement_type') or 'required',
                 'response_type': _infer_response_type(tx),
+                # #583: plan.pdhc's own name for the answer kind, carried
+                # through so a consumer sees the full concept definition
+                # ("Numerical", "Single choice", ...) and not only the
+                # gateway-vocab reduction of it.
+                'response_type_name': (
+                    tx.get('response_type_name')
+                    or _plan_concept_response_type_names().get(
+                        tx.get('concept_guid'))
+                    or ''
+                ),
             })
     return transactions
 

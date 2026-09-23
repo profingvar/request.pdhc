@@ -25,6 +25,7 @@ from app import db
 from app.models.care_plan_models import CarePlan
 from app.middleware.auth_middleware import requires_auth
 from app.services.auth_service import get_current_user_guid
+from app.services import context_service
 from app.services import plan_definition_service
 
 care_plans_bp = Blueprint('care_plans_api', __name__)
@@ -73,6 +74,11 @@ def create_care_plan():
             plandef_goals = pd.get('goals') or []
     except Exception:
         snapshot = None
+
+    # #583: same enrichment as on ServiceRequest creation — the care plan's
+    # stored snapshot carries each concept's full definition.
+    if snapshot is not None:
+        snapshot = context_service.enrich_snapshot_concepts(snapshot)
 
     cp = CarePlan(
         patient_guid=patient_guid,

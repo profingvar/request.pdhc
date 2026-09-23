@@ -6,6 +6,7 @@ from app import db
 from app.models.security_models import ProviderAccessToken
 from app.models.service_request_models import ServiceRequest, ServiceRequestContractMatch, ServiceRequestForm
 from app.services import patient_service, plan_definition_service, form_service
+from app.services import context_service
 from app.services.fhir_builder_service import build_service_request_resource, build_patient_excerpt
 from app.services.audit_service import log_event
 from app.services import scope_service
@@ -82,6 +83,12 @@ def create_service_request(patient_guid, plan_definition_guid, user_guid, org_gu
             }, 403
 
     patient_excerpt = build_patient_excerpt(patient_data)
+
+    # #583: stamp each transaction with its concept's full definition
+    # (response_type, response_type_name, unit) so the stored request is
+    # self-describing and does not depend on a live plan.pdhc to be
+    # interpreted later. No-op if plan.pdhc is unreachable.
+    plandef_data = context_service.enrich_snapshot_concepts(plandef_data)
 
     sr = ServiceRequest(
         status='draft',

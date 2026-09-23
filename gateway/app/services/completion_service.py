@@ -22,6 +22,50 @@ from app.services.audit_service import log_event
 _TERMINAL = ('completed', 'rejected')
 
 
+def archive_if_provider_work_complete(sr, source='gateway.pdhc',
+                                      ip_address=None):
+    """Archive an active ServiceRequest once no provider has open work (#582).
+
+    "When a provider says the patient is finished, the request is archived
+    automatically." One provider finishing is not enough on its own: an SR can
+    be matched to several providers, and archiving while another is still
+    working would pull live work out of that provider's feed. So the SR is
+    archived only when EVERY match is terminal (completed or rejected).
+
+    Only 'active' SRs are archived — a draft was never dispatched, and
+    'archived'/'revoked' are already terminal. Caller commits.
+
+    Returns True if this call archived the SR.
+    """
+    if sr is None or sr.status != 'active':
+        return False
+
+    matches = ServiceRequestContractMatch.query.filter_by(
+        service_request_guid=sr.guid,
+    ).all()
+    # No matches at all means nothing was ever dispatched to a provider;
+    # that is the auto-archive-on-expiry case, not this one.
+    if not matches:
+        return False
+    if any(m.status not in _TERMINAL for m in matches):
+        return False
+
+    sr.status = 'archived'
+    log_event(
+        action='servicerequest.auto_archived',
+        resource_type='ServiceRequest',
+        resource_guid=sr.guid,
+        details={
+            'source': source,
+            'reason': 'all provider matches terminal',
+            'match_count': len(matches),
+            'data_subject_guid': sr.patient_guid,
+        },
+        ip_address=ip_address,
+    )
+    return True
+
+
 def mark_service_request_completed(service_request_guid, source='gateway.pdhc',
                                    ip_address=None):
     """Flip this SR's open provider contract-match(es) to 'completed'.
@@ -57,7 +101,14 @@ def mark_service_request_completed(service_request_guid, source='gateway.pdhc',
         }
         updated += 1
 
-    if updated:
+    # #582: the provider reporting clinical completion is exactly the
+    # "provider says the patient is finished" signal. Archive the SR if that
+    # was the last provider still working on it.
+    archived = archive_if_provider_work_complete(
+        sr, source=source, ip_address=ip_address,
+    )
+
+    if updated or archived:
         db.session.commit()
 
     log_event(
@@ -67,6 +118,7 @@ def mark_service_request_completed(service_request_guid, source='gateway.pdhc',
         details={
             'source': source,
             'matches_updated': updated,
+            'archived': archived,
             'data_subject_guid': sr.patient_guid,
         },
         ip_address=ip_address,
@@ -76,4 +128,5 @@ def mark_service_request_completed(service_request_guid, source='gateway.pdhc',
         'status': 'completed',
         'service_request_guid': service_request_guid,
         'matches_updated': updated,
+        'archived': archived,
     }, 200

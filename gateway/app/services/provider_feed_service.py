@@ -13,15 +13,24 @@ from app.services.grant_service import issue_grant, use_grant
 from app.services.audit_service import log_event
 
 
-def list_for_provider(provider_org_guid, since=None, limit=50):
+def list_for_provider(provider_org_guid, since=None, limit=50,
+                      include_archived=False):
     """List ServiceRequests matched to this provider org.
 
     Returns metadata only — no patient data (GDPR data minimization).
+
+    Archived ServiceRequests are NOT listed by default (#582): an archived
+    request must not stay actively exposed to providers as if it were open
+    work. They remain *downloadable* by guid — see ``download_bundle`` — so
+    #90's late-submission path is intact for a provider that already holds
+    the request, and a provider reconciling its own backlog can still
+    enumerate them with ``include_archived``.
 
     Args:
         provider_org_guid: from validated PAT (never from request params)
         since: ISO datetime string, return only items updated after this
         limit: max items to return
+        include_archived: opt in to listing archived SRs as well
 
     Returns:
         tuple: (result_dict, status_code)
@@ -34,10 +43,13 @@ def list_for_provider(provider_org_guid, since=None, limit=50):
     ).filter(
         ServiceRequestContractMatch.provider_org_guid == provider_org_guid,
         ServiceRequestContractMatch.status.in_(['pending', 'sent', 'accepted']),
-        # Include 'archived' so providers can still locate a request past
-        # its period_end — late submissions are accepted but will be
-        # flagged by the gateway (ticket #90).
-        ServiceRequest.status.in_(['active', 'archived']),
+        # #582 supersedes #90 on this point: archived SRs are excluded from
+        # the feed unless explicitly asked for. #90's concern — a provider
+        # submitting late, past period_end — is served by download_bundle,
+        # which still accepts 'archived'.
+        ServiceRequest.status.in_(
+            ['active', 'archived'] if include_archived else ['active']
+        ),
     )
 
     if since:
