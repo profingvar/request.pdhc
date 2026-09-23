@@ -115,6 +115,19 @@ def auto_provision_pat():
             'error': 'provider_org_guid and contract_guid are required',
         }), 400
 
+    # #598 / onboard.pdhc OB-13 decision 1(c): a caller that mints the PAT
+    # itself opts out here, so the contract is not left with a second,
+    # dangling token whose raw value nobody ever saw. contract.pdhc already
+    # declines to call us at all when its own X-Skip-Auto-Provision is set
+    # (#599 item 3); honouring the header here as well covers any other
+    # caller that forwards it, and keeps the two services' contracts aligned.
+    if (request.headers.get('X-Skip-Auto-Provision') or '').strip().lower() in (
+            '1', 'true', 'yes'):
+        return jsonify({
+            'status': 'skipped',
+            'reason': 'X-Skip-Auto-Provision requested by caller',
+        }), 200
+
     # Check if a valid PAT already exists for this org+contract
     existing = ProviderAccessToken.query.filter_by(
         provider_org_guid=provider_org_guid,

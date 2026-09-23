@@ -917,3 +917,61 @@ not a product bug — worth its own ticket.
 
 **NOT COMMITTED:** git is blocked on this machine (macOS 27 Xcode licence, see
 the simprovider note). All of the above is on disk only.
+
+---
+
+## 2026-09-23 — #598: HTTP forms of the provider CLI, for onboard.pdhc
+
+onboard.pdhc runs in its own container and cannot shell into
+request_pdhc_app, so OB-8 (mint the secret, show it once) and OB-10 (verify,
+then the go-live gate) needed these over HTTP. All on the existing SU-admin
+gate (`@requires_auth` + `@requires_role('admin')`), same as
+POST /api/v1/admin/provider-tokens.
+
+New routes in `app/api/admin_tokens.py`:
+  POST   /api/v1/admin/provider-tokens/<guid>/rotate
+  POST   /api/v1/admin/signing-secrets
+  GET    /api/v1/admin/signing-secrets?provider_org_guid=
+  POST   /api/v1/admin/signing-secrets/<guid>/rotate
+  DELETE /api/v1/admin/signing-secrets/<guid>
+  POST   /api/v1/admin/sandbox-dispatch
+  POST   /api/v1/admin/sandbox-sign
+
+**Shared service, not a second implementation.** The ~80 lines of
+sandbox-dispatch logic moved into `app/services/sandbox_service.py`; the
+Flask CLI now renders that service's result rather than owning the logic, so
+`flask provider sandbox-dispatch` and the HTTP route cannot drift. The CLI
+keeps its own error text where it is CLI-specific (the "pass --webhook-url"
+hint means nothing over HTTP). The three existing CLI tests pass unchanged.
+
+**Design points worth keeping:**
+- Rotate routes are addressed by the CURRENT record's guid, which is what a
+  caller holding a provider record has; the underlying services work on
+  org+contract (PAT) and org (secret), so the guid is resolved first.
+- `DELETE /admin/signing-secrets/<guid>` revokes EVERY active and deprecated
+  secret for that org, not just the named one — `revoke_secret`'s real
+  semantics, and correct, since a half-revoked org would still verify bodies
+  signed with the sibling secret. The response lists every revoked guid so
+  the caller is not misled by the URL shape.
+- A failing provider in sandbox-dispatch is **200 with result=FAIL**, not a
+  5xx: the run succeeded, the news is bad. OB-10's go-live gate reads the
+  body, not the status code.
+- The secrets listing returns lifecycle timestamps but never secret material,
+  so it is safe to render in an operator UI.
+
+**Also:** `/internal/auto-provision-pat` now honours `X-Skip-Auto-Provision:
+1` (OB-13 decision 1c). contract.pdhc already declines to call at all when
+its own header is set (#599 item 3); honouring it here too covers any other
+caller that forwards it and keeps the two services' contracts aligned.
+
+**Bug found by the new tests:** the first cut of the secrets listing ordered
+by `WebhookSigningSecret.created_at`, which does not exist — the column is
+`issued_at`. Fixed, and the listing now also returns `deprecated_at`,
+`revoked_at` and `rotated_to_guid`.
+
+**Tests:** 248 passed, up from 226. New `tests/test_admin_onboarding_routes.py`
+(22). The 3 `test_blocks_filter.py` isolation failures remain pre-existing and
+untouched (they pass 17/17 in isolation).
+
+**NOT DEPLOYED.** Local only. Colima is down on this laptop (macOS 27), so the
+containers were not exercised; tests run on sqlite.

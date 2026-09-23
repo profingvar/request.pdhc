@@ -548,13 +548,20 @@ All edited files are noted here with full path, per Rule 17.
 - gateway/tests/test_context_demographics.py (new)
 Deployed to prod (surgical, checksum-verified). Enables cd-assist patient list to show names.
 
-## 2026-09-23 — tickets #583 (concept definition) + #582 (archiving)
-/Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/context_service.py
-/Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/service_request_service.py
-/Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/api/care_plans.py
-/Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/provider_feed_service.py
-/Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/api/provider.py
-/Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/completion_service.py
-/Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_concept_definition_snapshot.py   (new)
-/Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_auto_archive_on_completion.py    (new)
-/Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_provider_feed_archived.py        (rewritten for #582)
+## 2026-09-23 — #583 concept definition on the request, #582 archiving
+- gateway/app/services/context_service.py — enrich_snapshot_concepts(); _infer_response_type prefers the snapshot
+- gateway/app/services/service_request_service.py — enrich at SR capture
+- gateway/app/api/care_plans.py — enrich at CarePlan capture
+- gateway/app/services/provider_feed_service.py — archived excluded from the feed by default (#582, supersedes #90 on listing)
+- gateway/app/api/provider.py — ?include_archived=1 opt-in
+- gateway/app/services/completion_service.py — archive_if_provider_work_complete()
+- gateway/tests/test_concept_definition_snapshot.py (new)
+- gateway/tests/test_auto_archive_on_completion.py (new)
+- gateway/tests/test_provider_feed_archived.py — rewritten for the #582 contract, keeps #90's download guarantee
+
+## 2026-09-23 — #598 HTTP forms of the provider CLI (onboard.pdhc OB-8/OB-10)
+- gateway/app/services/sandbox_service.py (new) — shared by the CLI and the admin API so they cannot drift
+- gateway/app/api/admin_tokens.py — PAT rotate, signing-secret CRUD, sandbox-dispatch, sandbox-sign
+- gateway/app/api/internal.py — /internal/auto-provision-pat honours X-Skip-Auto-Provision
+- gateway/app/__init__.py — sandbox CLI delegates to sandbox_service
+- gateway/tests/test_admin_onboarding_routes.py (new)
