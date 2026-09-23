@@ -565,3 +565,8 @@ Deployed to prod (surgical, checksum-verified). Enables cd-assist patient list t
 - gateway/app/api/internal.py — /internal/auto-provision-pat honours X-Skip-Auto-Provision
 - gateway/app/__init__.py — sandbox CLI delegates to sandbox_service
 - gateway/tests/test_admin_onboarding_routes.py (new)
+
+## #690 deploy 2026-09-23 — files copied to miserver (no local source change)
+- gateway/app/{__init__.py,api/{admin_tokens,care_plans,internal,provider}.py}
+- gateway/app/services/{completion_service,context_service,provider_feed_service,service_request_service,sandbox_service}.py
+- gateway/tests/{test_provider_feed_archived,test_admin_onboarding_routes,test_auto_archive_on_completion,test_auto_complete,test_concept_definition_snapshot,test_context_demographics}.py

@@ -975,3 +975,47 @@ untouched (they pass 17/17 in isolation).
 
 **NOT DEPLOYED.** Local only. Colima is down on this laptop (macOS 27), so the
 containers were not exercised; tests run on sqlite.
+
+---
+
+## 2026-09-23 — #690: deployed #583 + #582 + #598 to request.pdhc.se
+
+Deployed and verified live. `request_pdhc_app` + `request_pdhc_worker`
+rebuilt, both healthy, `/api/health` 200, no errors in the log.
+
+Markers confirmed **inside the container**, not just on disk:
+`sandbox_service.py` present (#598), `rt_name_map` ×7 in context_service
+(#583), archive handling ×9 in provider_feed_service (#582).
+
+### What the pre-deploy diff found
+
+**The prod checkout has diverged from local.** Prod HEAD is `463633b`
+"Auto-close: internal endpoint…", which is **not in local history at all** —
+local has the same work as `0d73880`. The same change was committed
+separately on both sides. A `git pull` here would have merged messily; the
+deploy was done as a surgical file copy instead.
+
+Prod also carried **two uncommitted files** — `context_service.py` and
+`grant_service.py`, holding the ips patient-demographics feature. Checked
+before overwriting: `grant_service.py` was byte-identical to local, and
+`context_service.py` differed only by local *adding* the #583 changes on
+top. Local was a clean superset, so nothing was lost. Verified explicitly
+that **no file existed only on prod**.
+
+Migrations are identical (12 vs 11 listing entries — the difference is
+`__pycache__`), so no `flask db upgrade` was needed.
+
+### Note for the next deploy
+
+`/usr/local/www/request.pdhc/gateway/` **is** this service's application —
+a legacy directory name from the gateway/request split. The real
+gateway.pdhc lives at `/usr/local/www/gateway.pdhc.se/gateway_app` and was
+not touched. Compose project is pinned `request`; `docker compose` v2 is
+NOT available on the mini, `docker-compose` is.
+
+Prod's git tree still reports modified files relative to its own divergent
+HEAD. That is expected and was not "fixed" — reconciling the two histories
+is a separate job and not worth doing during a deploy.
+
+Predeploy tar: `~/backups/predeploy/request.pdhc/app_20260923T173027Z.tar.gz`
+Rollback image: `sha256:52b5da254d8a8`
