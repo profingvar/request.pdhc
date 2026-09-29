@@ -198,10 +198,48 @@ def use_grant(grant, user_guid=None, action='grant.used', ip_address=None):
     )
 
 
-def revoke_grant(grant_guid):
-    """Revoke a specific grant."""
+def revoke_grant(grant_guid, user_guid=None, ip_address=None):
+    """Revoke a data-exchange grant. Takes effect on the next validation.
+
+    `validate_grant_detailed` and `DataExchangeGrant.is_valid` have always
+    honoured the `revoked` flag, and until #708 nothing anywhere could set
+    it: this function had no caller, so a grant could be issued and used but
+    never withdrawn short of waiting for `expires_at`. That is the wrong
+    answer when a patient withdraws consent or a contract ends.
+
+    Shaped like `pat_service.revoke_pat` on purpose — same return contract,
+    same audit event, same refusal to double-revoke — because the two are
+    the same operation on different objects and an operator should not have
+    to remember which one behaves differently.
+
+    Returns:
+        tuple: (result_dict, status_code)
+    """
     grant = DataExchangeGrant.query.filter_by(guid=grant_guid).first()
-    if grant:
-        grant.revoked = True
-        db.session.commit()
-    return grant
+    if not grant:
+        return {'code': 'not_found', 'message': 'Grant not found'}, 404
+
+    if grant.revoked:
+        return {'code': 'already_revoked',
+                'message': 'Grant already revoked'}, 400
+
+    grant.revoked = True
+    db.session.commit()
+
+    log_event(
+        user_guid=user_guid,
+        action='grant.revoked',
+        resource_type='DataExchangeGrant',
+        resource_guid=grant.guid,
+        details={
+            'service_request_guid': grant.service_request_guid,
+            'patient_guid': grant.patient_guid,
+            'provider_org_guid': grant.provider_org_guid,
+            # the same key use_grant records, so a revocation and the uses
+            # before it line up in one query over the audit
+            'data_subject_guid': grant.patient_guid,
+        },
+        ip_address=ip_address,
+    )
+
+    return grant.to_dict(), 200

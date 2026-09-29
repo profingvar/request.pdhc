@@ -1019,3 +1019,41 @@ is a separate job and not worth doing during a deploy.
 
 Predeploy tar: `~/backups/predeploy/request.pdhc/app_20260923T173027Z.tar.gz`
 Rollback image: `sha256:52b5da254d8a8`
+
+## #708 — a grant could be issued and used, never withdrawn (2026-09-29)
+
+`DataExchangeGrant.is_valid()` returns False on `revoked`, and
+`validate_grant_detailed` honours it on every call. The only thing in the
+codebase that could ever set that flag was `revoke_grant`, and **nothing
+called `revoke_grant`** — `grant_service.py:205` was the sole assignment to
+`grant.revoked` anywhere in the service.
+
+So the check was live, the consequence was enforced, and the switch was
+connected to nothing. A grant stood until `expires_at` regardless of a
+patient withdrawing or a contract ending. The only available action was
+revoking the PAT, which cuts the provider off from *everything* rather than
+from one ServiceRequest.
+
+**Correction to the #704 triage report.** It listed this as "redundant
+rather than missing — there are CLI commands that do it". Those commands
+(`revoke-pat`, `revoke-signing-secret`) revoke PATs and webhook signing
+secrets, which are different objects. Nothing revoked a grant. The finding
+was stronger than reported, not weaker.
+
+**Changed**
+- `revoke_grant(grant_guid, user_guid=None, ip_address=None)` reshaped onto
+  the `pat_service.revoke_pat` contract: `(dict, status)`, 404 on unknown,
+  400 `already_revoked` on a second call, and a `grant.revoked` audit event
+  carrying `data_subject_guid` so a patient's uses and their withdrawal come
+  out of one query. The old version returned the ORM row or None, which is
+  why no caller could tell "not found" from "done".
+- `flask provider revoke-grant --grant-guid <guid>` — the entry point,
+  alongside the existing `revoke-pat`.
+
+No HTTP route: PAT and secret revocation are CLI-only here, and this is the
+same operation on a different object. Matching the precedent beats inventing
+a new admin surface for it.
+
+256 tests pass (was 248). The 3 pre-existing `test_blocks_filter.py`
+TestServiceLayer failures under a full-suite run are unrelated and predate
+this change — they pass when that file is run alone.

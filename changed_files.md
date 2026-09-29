@@ -570,3 +570,9 @@ Deployed to prod (surgical, checksum-verified). Enables cd-assist patient list t
 - gateway/app/{__init__.py,api/{admin_tokens,care_plans,internal,provider}.py}
 - gateway/app/services/{completion_service,context_service,provider_feed_service,service_request_service,sandbox_service}.py
 - gateway/tests/{test_provider_feed_archived,test_admin_onboarding_routes,test_auto_archive_on_completion,test_auto_complete,test_concept_definition_snapshot,test_context_demographics}.py
+
+## 2026-09-29 — #708 grant revocation had no caller (#704 triage, item 3)
+/Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/grant_service.py
+/Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/__init__.py
+/Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_grant_revocation.py
+/Users/martiningvar/T7_sidewinder/request.pdhc/progress.md

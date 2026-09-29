@@ -277,6 +277,22 @@ def _register_provider_cli(app):
             raise SystemExit(1)
         click.echo(f'revoked: {data["guid"]}')
 
+    @provider_group.command('revoke-grant')
+    @click.option('--grant-guid', required=True)
+    def cmd_revoke_grant(grant_guid):
+        """Revoke a data-exchange grant by its guid. Takes effect immediately.
+
+        Use this when a patient withdraws or a contract ends. Revoking the
+        PAT instead cuts the provider off entirely; this withdraws one
+        ServiceRequest's authorisation and leaves the rest working.
+        """
+        from app.services.grant_service import revoke_grant
+        data, status = revoke_grant(grant_guid, user_guid='cli')
+        if status != 200:
+            click.echo(f'error: {data}', err=True)
+            raise SystemExit(1)
+        click.echo(f'revoked: {data["guid"]}')
+
     @provider_group.command('register-signing-secret')
     @click.option('--org-guid', required=True)
     def cmd_register_secret(org_guid):
