@@ -1020,7 +1020,10 @@ is a separate job and not worth doing during a deploy.
 Predeploy tar: `~/backups/predeploy/request.pdhc/app_20260923T173027Z.tar.gz`
 Rollback image: `sha256:52b5da254d8a8`
 
-## #708 — a grant could be issued and used, never withdrawn (2026-09-29)
+## Ticket #706 — a grant could be issued and used, never withdrawn (2026-09-29)
+
+(Committed as "#708" — the ticket was created afterwards and came back as
+#706. See ~/T7_sidewinder/docs/wiring_triage_2026-09-29.md for the mapping.)
 
 `DataExchangeGrant.is_valid()` returns False on `revoked`, and
 `validate_grant_detailed` honours it on every call. The only thing in the
