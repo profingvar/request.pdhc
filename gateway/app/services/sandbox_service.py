@@ -48,7 +48,18 @@ def run_dispatch(provider_org_guid, contract_guid, concept_guids=None,
                             'webhook_url to override.'),
             }, 400
 
-    sr_guid = f'sandbox-{uuid.uuid4()}'
+    # #720: a plain uuid, NOT f'sandbox-{uuid4}'. The prefixed form was 44
+    # characters going into webhook_deliveries.service_request_guid, which is
+    # varchar(36) like every other service_request_guid column on the
+    # platform — because a guid IS 36 characters. So every push-mode sandbox
+    # dispatch died with StringDataRightTruncation and returned a 500, which
+    # is the go-live gate for a push provider. It had never been noticed
+    # because push mode had never been run end to end.
+    #
+    # Nothing read the prefix back: it was constructed here and parsed
+    # nowhere. What marks a run as a sandbox is `'sandbox': True` in the
+    # payload below, which was always the real signal.
+    sr_guid = str(uuid.uuid4())
     payload = {
         'event': EVENT_TYPE,
         'event_version': '1.0',

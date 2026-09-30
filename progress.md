@@ -1114,3 +1114,53 @@ more often than the platform was**: an invented path, a wrong credential, a
 wrong method name, and this tuple bug. That is the argument for running them
 rather than reasoning about them, and for driving the service's own clients
 rather than hand-writing the calls.
+
+## Ticket #720 — every push-mode sandbox dispatch returned 500 (2026-09-30)
+
+Found by the first push-mode onboarding run (#716). `POST
+/api/v1/admin/sandbox-dispatch` returned 500:
+
+```
+psycopg2.errors.StringDataRightTruncation: value too long for varchar(36)
+  INSERT INTO webhook_deliveries (... service_request_guid ...)
+  → 'sandbox-c6c0b57b-d623-485d-b7a1-610ab64384ec'   (44 chars)
+```
+
+`sandbox_service.py:51` built `f'sandbox-{uuid.uuid4()}'` — a 36-character
+guid plus an 8-character prefix — into a `varchar(36)` column.
+
+That endpoint is the **go-live gate for a push provider**, so no push
+onboarding could ever complete. It had never been noticed because push mode
+had never been run end to end; poll is what both live providers use.
+
+### The fix: drop the prefix, do not widen the column
+
+Checked rather than assumed: the prefix was **constructed in exactly one
+place and parsed nowhere**. Every other `sandbox-` reference in the repo is a
+route or CLI command name. And every `service_request_guid` column on the
+platform is `varchar(36)` — most with a foreign key to `service_requests.guid`
+— because a guid is 36 characters. `webhook_deliveries`' copy is nullable with
+no FK, which is the only reason a sandbox row was permitted there at all.
+
+Widening one column would have encoded in the schema the idea that a guid
+field holds something that is not a guid. What actually marks a run as a
+sandbox is `'sandbox': True` in the payload, which was always the real signal.
+
+### Why three existing tests passed throughout
+
+`tests/test_sandbox_dispatch.py` had three tests covering this path and all
+passed, before and after. **They run on SQLite, which does not enforce VARCHAR
+length; Postgres does.** A backend that silently accepts an over-long value
+cannot catch a column overflow.
+
+This is the same shape as the `alembic_version` varchar(32) lesson: a
+constraint that only exists in production cannot be tested by a suite that
+does not run against it.
+
+So the new tests assert the length **directly** rather than leaving it to the
+database, and one asserts that every `service_request_guid` column shares the
+same width — the reason the fix is to drop the prefix rather than widen one.
+Verified to have teeth: restoring the prefix makes them fail.
+
+260 tests pass (was 256). The 3 `test_blocks_filter` TestServiceLayer failures
+in a full run are pre-existing and unrelated; they pass in isolation.

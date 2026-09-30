@@ -125,3 +125,56 @@ def test_sandbox_sign_emits_valid_signature(app, tmp_path):
     sig = sig_line.split(': ', 1)[1].strip()
     expected = webhook_dispatcher.compute_signature(secret, payload)
     assert sig == expected
+
+
+class TestTheSandboxGuidFitsItsColumn:
+    """#720 — the sandbox dispatch built ``f'sandbox-{uuid4}'``: 44 characters
+    into ``webhook_deliveries.service_request_guid``, which is varchar(36)
+    like every other service_request_guid column on the platform, because a
+    guid IS 36 characters.
+
+    Every push-mode sandbox dispatch therefore died with
+    ``StringDataRightTruncation`` and returned a 500 — and that endpoint is
+    the go-live gate for a push provider, so no push onboarding could ever
+    complete.
+
+    **These tests exist because the three above passed throughout.** They run
+    on SQLite, which does not enforce VARCHAR length; Postgres does. A backend
+    that silently accepts an over-long value cannot catch a column overflow,
+    so the length is asserted directly here rather than left to the database.
+    """
+
+    def _column_limit(self):
+        from app.models.security_models import WebhookDelivery
+        return WebhookDelivery.__table__.c.service_request_guid.type.length
+
+    def test_the_generated_guid_fits(self, app):
+        import re
+        from app.services import sandbox_service
+        src = __import__("inspect").getsource(sandbox_service)
+        m = re.search(r"sr_guid\s*=\s*(.+)", src)
+        assert m, "could not find the guid construction"
+        assert "sandbox-" not in m.group(1), (
+            "the 'sandbox-' prefix is back; it does not fit varchar(36)")
+
+    def test_a_uuid_is_exactly_the_column_width(self, app):
+        import uuid
+        assert len(str(uuid.uuid4())) == self._column_limit() == 36
+
+    def test_the_old_prefixed_form_would_not_have_fit(self, app):
+        """Kept as the record of the defect: 44 was not near the limit, it
+        was 8 characters over it."""
+        import uuid
+        assert len(f"sandbox-{uuid.uuid4()}") > self._column_limit()
+
+    def test_every_service_request_guid_column_is_the_same_width(self, app):
+        """The reason the fix is to drop the prefix rather than widen one
+        column: they all hold the same kind of value."""
+        from app import db
+        widths = {}
+        for table in db.metadata.tables.values():
+            col = table.c.get("service_request_guid")
+            if col is not None and getattr(col.type, "length", None):
+                widths[table.name] = col.type.length
+        assert widths, "expected service_request_guid columns"
+        assert set(widths.values()) == {36}, f"inconsistent widths: {widths}"
