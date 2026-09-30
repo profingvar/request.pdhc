@@ -1060,3 +1060,57 @@ a new admin surface for it.
 256 tests pass (was 248). The 3 pre-existing `test_blocks_filter.py`
 TestServiceLayer failures under a full-suite run are unrelated and predate
 this change — they pass when that file is run alone.
+
+## #708 — sibling smoke for request.pdhc (2026-09-30)
+
+`gateway/deploy/smoke_siblings.py`, run inside the container:
+
+```
+docker exec request_pdhc_app python deploy/smoke_siblings.py
+docker exec request_pdhc_app python deploy/smoke_siblings.py --json
+```
+
+Read-only, exit 0 only if everything passed. **All 8 checks pass** across ips
+(spärr, consent, patients), contract.pdhc, plan.pdhc and sso.
+
+### The check this service specifically needed
+
+`ips_client`'s own docstring records that its spärr filter sent the key as
+`X-API-Key` (ips reads only `Authorization`) against the staff `/blocks` list
+endpoint instead of the purpose-built predicate — so **every call 401'd and the
+filter silently failed open: no ServiceRequest was ever hidden.**
+
+That is fixed, but `check_block` returns `(False, [])` on any error *by design
+and for legal reasons* (an ips outage must not hide rows). So a wrong
+credential is invisible in its return value — "nothing is blocked" and "I could
+not ask" are the same answer. There is therefore a second check that makes the
+same authenticated call directly and fails on a 401, so the regression would be
+**visible** rather than silent. It reports `-> 404 (the ApiKey is accepted)`:
+404 because the probe patient does not exist, which is the right answer.
+
+### A mistake of mine that is worth more than the smoke
+
+Three checks did `len(rows)` on the result of `list_contracts()`,
+`list_patients()` and `list_plan_definitions()`. Those return
+**`(payload, status)`**, so `len` counted the tuple — always 2. It reported
+"2 contract(s)" when contract.pdhc holds 8, and I nearly chased that as a
+finding.
+
+Far worse: an upstream failure returns `({'code': 'upstream_error'}, 502)`,
+which is also a two-element tuple and neither empty nor None. **All three
+checks would have passed on a 502.** A smoke that reports health while the
+boundary is broken is worse than no smoke at all.
+
+Now unpacked through `_unpack()`, which requires status 200 and counts the
+payload. Verified against five cases — healthy, 502, 404, empty-but-200 and a
+wrong shape — rather than assumed. Real numbers now: 8 contracts (matching the
+database), 4 patients, 4 plandefinitions.
+
+### Across all three smokes
+
+analyse found two real defects (#717, #718). gateway and request found none —
+both are correctly wired. In every one of the three, **the script was wrong
+more often than the platform was**: an invented path, a wrong credential, a
+wrong method name, and this tuple bug. That is the argument for running them
+rather than reasoning about them, and for driving the service's own clients
+rather than hand-writing the calls.
