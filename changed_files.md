@@ -576,3 +576,11 @@ Deployed to prod (surgical, checksum-verified). Enables cd-assist patient list t
 /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/__init__.py
 /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_grant_revocation.py
 /Users/martiningvar/T7_sidewinder/request.pdhc/progress.md
+
+## 2026-10-06 — #774 patient_org_guid
+- gateway/app/services/patient_service.py
+- gateway/app/services/service_request_service.py
+- gateway/app/services/context_service.py
+- gateway/app/models/service_request_models.py
+- gateway/migrations/versions/d0e1f2a3b4c5_sr_patient_org_guid.py
+- gateway/tests/test_patient_org_resolution.py

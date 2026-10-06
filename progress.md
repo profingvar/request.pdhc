@@ -1164,3 +1164,48 @@ Verified to have teeth: restoring the prefix makes them fail.
 
 260 tests pass (was 256). The 3 `test_blocks_filter` TestServiceLayer failures
 in a full run are pre-existing and unrelated; they pass in isolation.
+
+## 2026-10-06 — #774 resolve and snapshot the patient's organisation
+
+#768: one organisation per datapoint, and it is the one the patient was
+affiliated with in ips **at request time**.
+
+The lookup already existed. `patient_service.get_patient_clinic_guids()` has
+been calling ips `/api/v1/patients/<guid>/clinics` at every ServiceRequest
+creation since #225, and `Clinic.to_dict()` returns `organisation_guid` — but
+the caller keeps `[c.get('guid') for c in clinics]` and discards it. Same shape
+as #776: the value arrives and nobody stores it.
+
+Added `get_patient_clinic_orgs()` (keeps both) and `resolve_patient_org_guid()`,
+which returns **None rather than a guess** when the patient has no clinic (28 of
+ips's 150), when several clinics resolve to different organisations (a guard —
+all 122 assigned patients have exactly one today, and `PatientIndex` has no
+primary/home field to break a tie), when `Clinic.organisation_guid` is NULL, or
+when ips cannot answer. Several clinics agreeing on one organisation still
+resolve.
+
+Snapshotted onto `service_requests.patient_org_guid` at creation, because ips
+keeps **no assignment history** — `patient_clinic_assignments` has `assigned_at`
+and no end timestamp, so asking later returns today's answer for an old request.
+Exposed in the SR context so gateway carries it to the CDR row (#769/#773), read
+with `getattr` for rows seen during a rolling deploy.
+
+The audit entry records `patient_org_resolved`, so an unresolved affiliation is
+visible in the log rather than only as a NULL column.
+
+### Found, filed as #779
+The authorisation gate above this compares `caller_org_ids` (sso **organisation**
+guids) with `patient_clinic_guids` (ips **Clinic.guid**). Measured: **0 of ips's
+9 clinics have `guid == organisation_guid`** — the intersection can never match,
+so every non-SU caller is denied. It fails closed, and it has never run because
+only the SU account creates ServiceRequests (#778). Kept out of this ticket
+deliberately: changing an authorisation comparison is its own change with its own
+risk, and bundling it into a provenance ticket would hide it.
+
+### Also noticed
+ips returns **500**, not 404, for a malformed patient guid
+(`/api/v1/patients/does-not-exist/clinics`). The gate treats ≥500 as fail-closed,
+so the direction is safe, but a 500 on user input is a defect in ips.
+
+270 tests pass (10 new). Three pre-existing `test_blocks_filter` failures are
+order-dependent leaks that fail identically at HEAD — verified by stashing.

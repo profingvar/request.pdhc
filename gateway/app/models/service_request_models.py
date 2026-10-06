@@ -37,6 +37,12 @@ class ServiceRequest(db.Model):
     requester_user_guid = db.Column(db.String(36), nullable=False)
     requester_user_name = db.Column(db.String(255), nullable=True)
     requester_org_guid = db.Column(db.String(36), nullable=True, index=True)
+    # #774/#768: the organisation the PATIENT was affiliated with in ips at
+    # request time. NOT requester_org_guid above — that is who ordered the
+    # collection. Operator 2026-10-06: "requesting clinic is not the same as
+    # the patient affiliation clinic". ips keeps no assignment history, so this
+    # cannot be reconstructed later; it is snapshotted here.
+    patient_org_guid = db.Column(db.String(36), nullable=True, index=True)
     requester_org_name = db.Column(db.String(255), nullable=True)
 
     notes = db.Column(db.Text, nullable=True)
@@ -69,6 +75,7 @@ class ServiceRequest(db.Model):
             'requester_user_guid': self.requester_user_guid,
             'requester_user_name': self.requester_user_name,
             'requester_org_guid': self.requester_org_guid,
+            'patient_org_guid': self.patient_org_guid,
             'requester_org_name': self.requester_org_name,
             # #294 / #306 phase 6: canonical clinical-context names.
             # Emitted alongside the legacy `requester_*` keys during

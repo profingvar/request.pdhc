@@ -108,3 +108,75 @@ def get_patient_clinic_guids(patient_guid):
             patient_guid, e,
         )
         return [], 502
+
+
+def get_patient_clinic_orgs(patient_guid):
+    """Return the patient's clinics as (clinic_guid, organisation_guid) pairs.
+
+    The ORGANISATION guid is the one the platform records on a datapoint
+    (#768/#774) — `Clinic.guid` is ips's own primary key and lives in a
+    different identifier space entirely. `get_patient_clinic_guids` above
+    already fetches this response and keeps only the clinic guid, discarding
+    the organisation; this returns both so a caller can record the right one.
+
+    Measured 2026-10-06: 0 of ips's 9 clinics have `guid == organisation_guid`.
+    They are never interchangeable. See #779.
+
+    Returns:
+        (pairs: list[tuple[str, str | None]], status: int)
+        On success: ([(clinic_guid, organisation_guid), ...], 200) — the
+        organisation may be None, because `Clinic.organisation_guid` is
+        nullable. The empty list is a valid 200: the patient exists with no
+        assignments.
+        On not-found: ([], 404). On upstream error: ([], 502 or the 5xx seen).
+    """
+    base = current_app.config['IPS_BASE_URL'].rstrip('/')
+    url = f"{base}/api/v1/patients/{patient_guid}/clinics"
+    try:
+        resp = requests.get(url, headers=_headers(), timeout=15)
+        if resp.status_code == 404:
+            return [], 404
+        resp.raise_for_status()
+        clinics = resp.json() or []
+        return ([(c.get('guid'), c.get('organisation_guid'))
+                 for c in clinics if c.get('guid')], 200)
+    except requests.RequestException as e:
+        current_app.logger.warning(
+            "ips clinic/org lookup failed for patient %s: %s", patient_guid, e)
+        return [], 502
+
+
+def resolve_patient_org_guid(patient_guid):
+    """The single organisation to record on this patient's data, or None.
+
+    #768: one organisation identifier per datapoint, and it is the one the
+    patient was affiliated with in ips **at request time**. ips keeps no
+    assignment history — `patient_clinic_assignments` has `assigned_at` and no
+    end timestamp — so this value cannot be reconstructed later. It must be
+    captured now and stored.
+
+    Returns None, deliberately, rather than guessing, when:
+
+    * the patient has **no** clinic assignment (28 of ips's 150 patients today);
+    * the patient has **several** and they resolve to different organisations —
+      all 122 assigned patients have exactly one today, so this is a guard, not
+      a workflow. `PatientIndex` has no primary/home field to break the tie, and
+      inventing a rule here would write a guess into every subsequent datapoint;
+    * the clinic carries no `organisation_guid` (the column is nullable);
+    * ips cannot answer.
+
+    A NULL that is visible is better than a plausible value that is wrong — the
+    same rule #665 applied to `author_org_guid`.
+    """
+    pairs, status = get_patient_clinic_orgs(patient_guid)
+    if status != 200:
+        return None
+    orgs = {o for _, o in pairs if o}
+    if len(orgs) == 1:
+        return orgs.pop()
+    if len(orgs) > 1:
+        current_app.logger.info(
+            "patient %s resolves to %d organisations %s — recording none, "
+            "because choosing would be a guess (#774)",
+            patient_guid, len(orgs), sorted(orgs))
+    return None

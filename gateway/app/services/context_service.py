@@ -251,6 +251,14 @@ def get_sr_context(sr_guid):
         # deprecation window. Consumers should switch to
         # `requesting_org_guid`; legacy key removed after one release.
         'requesting_org_guid': sr.requester_org_guid,
+        # #774: the PATIENT's organisation, distinct from the requester above.
+        # The gateway forwards this to the CDR, which stores it on the datapoint
+        # row (#769). Snapshotted at SR creation because ips keeps no
+        # assignment history.
+        # getattr, not attribute access: this can be handed an SR read before
+        # the column existed — during a rolling deploy, or from a test double.
+        # Same reason gateway's cdr_forwarder uses it for author_org_guid.
+        'patient_org_guid': getattr(sr, 'patient_org_guid', None),
         'plan_definition_guid': sr.plan_definition_guid,
         'period_start': sr.period_start.isoformat() if sr.period_start else None,
         'period_end': sr.period_end.isoformat() if sr.period_end else None,

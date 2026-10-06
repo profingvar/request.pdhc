@@ -90,9 +90,22 @@ def create_service_request(patient_guid, plan_definition_guid, user_guid, org_gu
     # interpreted later. No-op if plan.pdhc is unreachable.
     plandef_data = context_service.enrich_snapshot_concepts(plandef_data)
 
+    # #774/#768: the organisation the PATIENT is affiliated with in ips, taken
+    # NOW because ips keeps no assignment history — `patient_clinic_assignments`
+    # has `assigned_at` and no end timestamp, so asking later returns today's
+    # answer for an old request. None rather than a guess when the patient has
+    # no clinic, several resolving to different organisations, or a clinic with
+    # no organisation_guid.
+    #
+    # Deliberately NOT `org_guid` below: that is the REQUESTER. Operator,
+    # 2026-10-06: "requesting clinic is not the same as the patient affiliation
+    # clinic." Two columns because they are two facts.
+    patient_org_guid = patient_service.resolve_patient_org_guid(patient_guid)
+
     sr = ServiceRequest(
         status='draft',
         patient_guid=patient_guid,
+        patient_org_guid=patient_org_guid,
         patient_excerpt=patient_excerpt,
         plan_definition_guid=plan_definition_guid,
         plan_definition_snapshot=plandef_data,
@@ -111,7 +124,12 @@ def create_service_request(patient_guid, plan_definition_guid, user_guid, org_gu
         action='service_request.create',
         resource_type='ServiceRequest',
         resource_guid=sr.guid,
-        details={'patient_guid': patient_guid, 'plan_definition_guid': plan_definition_guid},
+        details={'patient_guid': patient_guid,
+                 'plan_definition_guid': plan_definition_guid,
+                 # recorded so an absent affiliation is visible in the audit
+                 # rather than only as a NULL column (#774)
+                 'patient_org_guid': patient_org_guid,
+                 'patient_org_resolved': patient_org_guid is not None},
         ip_address=ip_address,
     )
 
