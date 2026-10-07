@@ -587,3 +587,5 @@ Deployed to prod (surgical, checksum-verified). Enables cd-assist patient list t
 - gateway/app/api/service_requests.py
 - gateway/app/services/patient_service.py
 - gateway/tests/test_service_request_create_authz.py
+- gateway/tests/conftest.py
+- gateway/tests/test_dispatch_trigger.py

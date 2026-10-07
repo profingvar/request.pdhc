@@ -1288,3 +1288,79 @@ worth its own ticket.
 
 Local only. This widens authorisation — it starts admitting callers currently
 denied — so the deploy is a separate decision.
+
+## #768/#735 decisions implemented (2026-10-07)
+
+Operator ratified `plans/decisions_735_768.md`. Two answers changed this repo.
+
+**No clinic → REFUSE** (was: store NULL and create the SR anyway, which was
+Claude's default, not a decision). **Several clinics → ALLOW**, which needed a
+tie-break after all.
+
+The tie-break invents nothing — the objection to allowing it was that an
+invented rule gets written onto every subsequent datapoint as a fact. It reuses
+a choice the caller is already forced to state:
+
+    patient_org_guid = the patient's clinic organisation that equals requesting_org_guid
+
+Determinate in every realistic path: a single-org caller has it auto-filled, a
+multi-org caller must supply it (#226 removed silent first-pick), and for a
+non-SU caller the #779 gate has already established that one of the patient's
+organisations is among the caller's own.
+
+The residual case — several affiliations, requester is none of them, reachable
+mainly for an SU admin who bypasses the #779 gate — still refuses. Ordering by
+`assigned_at` or guid would settle it and would be exactly the invention
+objected to.
+
+**The tie-break applies only to a tie.** With one affiliation the patient's own
+organisation wins even when the requester is someone else, or `patient_org_guid`
+becomes a second copy of `requesting_org_guid` and they stop being two facts.
+
+`resolve_patient_org_guid(patient_guid, *, requesting_org_guid=None)` raises
+`PatientOrgUnresolved` instead of returning None:
+
+| code | HTTP | meaning |
+|---|---|---|
+| `patient_not_found` | 404 | keeps the #779 gate's meaning on this route |
+| `ips_unavailable` | 502 | fail closed; an outage is not permission to write no organisation |
+| `patient_org_unassigned` | 409 | no clinic, or all clinics unbridged to sso (#780) |
+| `patient_org_ambiguous` | 409 | the residual case |
+
+Each writes `service_request.create.refused` with the facts, so a refusal is
+diagnosable without re-querying ips, and the two 409s are different operator
+actions.
+
+### A third set of tests was calling production
+
+`test_dispatch_trigger.py`'s `stubs` fixture never stubbed the ips clinic
+lookup, so 4 tests called `https://ips.pdhc.se` every run. They passed only
+because the 401 was **tolerated** — the resolver returned None and the SR was
+created anyway. The refusal decision turned that into a failure, which is how it
+surfaced. Two earlier passes had missed it.
+
+`conftest.py` now has an autouse `_no_real_ips_calls` fixture, suite-wide. It
+raises `requests.ConnectionError` — what a real outage raises — not a louder
+custom error, because older modules are *written* to tolerate the upstream being
+down (`test_patients.py`: "upstream calls are expected to fail in test
+environment, which is acceptable", asserting `status in (200, 502)`). Those
+assertions pass whether ips answers or not; tightening them is a separate job
+and is not done here. Opt out per-test with
+`@pytest.mark.allow_ips_network`.
+
+Verified: 0 occurrences of a production ips call in a full suite run.
+
+### Test results
+
+    tests/test_patient_org_resolution.py        15 passed  (was 9)
+    tests/ (full suite)                        278 passed, 3 failed
+
+The 3 are the same **pre-existing** `test_blocks_filter.py::TestServiceLayer`
+cross-test pollution failures (`assert total == 2` gets 10), verified against
+the untouched tree. They want their own ticket.
+
+### NOT DEPLOYED
+
+Local only, and this one changes behaviour a user will notice: a ServiceRequest
+for a patient with no clinic assignment now fails where it used to succeed. 28
+of ips's 150 patients are in that state.

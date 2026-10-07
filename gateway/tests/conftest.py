@@ -1,5 +1,8 @@
 import os
+from unittest.mock import patch
+
 import pytest
+import requests
 
 # Force test configuration before any imports
 os.environ['AUTH_DISABLED'] = 'true'
@@ -63,6 +66,58 @@ def _pin_auth_disabled(app):
     app.config['AUTH_DISABLED'] = True
     yield
     app.config['AUTH_DISABLED'] = prev
+
+
+@pytest.fixture(autouse=True)
+def _no_real_ips_calls(request):
+    """No test in this repo may reach ips.pdhc over the network.
+
+    Found twice in one session, both times by accident. A test that patched the
+    wrong function name left the real lookup in place and it called
+    `https://ips.pdhc.se/api/v1/patients/<guid>/clinics`, which answered 401:
+
+    * `test_service_request_create_authz` after #779 moved the gate to a new
+      helper — the tests failed, so nothing passed silently;
+    * `test_dispatch_trigger`'s `stubs` fixture never stubbed the lookup at all,
+      and was saved only by the 401 being *tolerated* — the resolver returned
+      None and the ServiceRequest was created anyway. The 2026-10-07 refusal
+      decision turned that into a failure, which is how it was noticed.
+
+    A unit run must not depend on a production service being reachable, and a
+    wrong patch target should say so rather than look like an upstream 502. So
+    the module's `requests.get` raises here, naming the URL.
+
+    It raises `requests.ConnectionError` — the same thing a genuinely
+    unreachable ips raises — rather than a louder custom error, on purpose.
+    Several older modules are written to tolerate the upstream being down
+    (`test_patients.py`: "upstream calls are expected to fail in test
+    environment, which is acceptable", asserting `status in (200, 502)`), and
+    they were only ever passing *because* production answered 401. Simulating
+    the outage keeps them meaningful while cutting the network dependency.
+
+    Those tolerant assertions are weak — they pass whether ips answers or not —
+    but tightening them is a separate job from cutting the network call.
+
+    Loudness where it matters comes from the code instead: since the 2026-10-07
+    decision an unresolvable organisation REFUSES, so a create path that forgot
+    to stub ips now fails its own assertion rather than quietly writing NULL.
+
+    Opt out with `@pytest.mark.allow_ips_network` for a test that deliberately
+    exercises the HTTP layer against a local stub.
+    """
+    if request.node.get_closest_marker("allow_ips_network"):
+        yield
+        return
+
+    def _unreachable(url, *a, **kw):
+        raise requests.ConnectionError(
+            f"ips is not reachable from the test suite ({url}) — patch "
+            f"patient_service.get_patient_clinic_orgs (or get_patient) if this "
+            f"test needs an answer")
+
+    with patch("app.services.patient_service.requests.get",
+               side_effect=_unreachable):
+        yield
 
 
 @pytest.fixture(autouse=True)

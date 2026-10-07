@@ -70,6 +70,17 @@ def stubs(monkeypatch):
         'app.services.service_request_service.build_patient_excerpt',
         lambda data: {},
     )
+    # The patient's ips clinic → organisation. Not optional any more: since the
+    # 2026-10-07 decision, create_service_request REFUSES when it cannot
+    # establish one organisation, so an unstubbed lookup fails the test instead
+    # of quietly storing NULL. Before that, this fixture reached the real
+    # https://ips.pdhc.se from the unit suite and was saved only by the 401
+    # being tolerated.
+    monkeypatch.setattr(
+        'app.services.service_request_service.patient_service.'
+        'get_patient_clinic_orgs',
+        lambda p_guid: ([('clinic-152', 'org-152')], 200),
+    )
     # No contract scope defined → allow path
     monkeypatch.setattr(scope_service, 'fetch_scope', lambda guid: None)
 

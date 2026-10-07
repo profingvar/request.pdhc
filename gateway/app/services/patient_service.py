@@ -160,8 +160,28 @@ def get_patient_clinic_orgs(patient_guid):
         return [], 502
 
 
-def resolve_patient_org_guid(patient_guid):
-    """The single organisation to record on this patient's data, or None.
+class PatientOrgUnresolved(Exception):
+    """No single organisation could be established for this patient.
+
+    Carries a machine `code` and the facts behind it, so the API layer can
+    refuse with something the operator can act on rather than a bare 409.
+    """
+
+    def __init__(self, code, message, *, orgs=(), clinics=()):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.orgs = sorted(orgs)
+        self.clinics = sorted(clinics)
+
+    def as_details(self):
+        return {'reason': self.code,
+                'patient_org_guids': self.orgs,
+                'patient_clinic_guids': self.clinics}
+
+
+def resolve_patient_org_guid(patient_guid, *, requesting_org_guid=None):
+    """The single organisation to record on this patient's data.
 
     #768: one organisation identifier per datapoint, and it is the one the
     patient was affiliated with in ips **at request time**. ips keeps no
@@ -169,28 +189,82 @@ def resolve_patient_org_guid(patient_guid):
     end timestamp — so this value cannot be reconstructed later. It must be
     captured now and stored.
 
-    Returns None, deliberately, rather than guessing, when:
+    Operator decisions, 2026-10-07:
 
-    * the patient has **no** clinic assignment (28 of ips's 150 patients today);
-    * the patient has **several** and they resolve to different organisations —
-      all 122 assigned patients have exactly one today, so this is a guard, not
-      a workflow. `PatientIndex` has no primary/home field to break the tie, and
-      inventing a rule here would write a guess into every subsequent datapoint;
-    * the clinic carries no `organisation_guid` (the column is nullable);
-    * ips cannot answer.
+    * **No clinic → REFUSE** (28 of ips's 150 patients today). #735 requires the
+      organisation on every datapoint, so a NULL row is the non-compliant
+      artefact these tickets exist to prevent; it would also be invisible to
+      every organisation-scoped reader under Rule 24, meaning data collected and
+      then unreadable by the people who collected it. Refusing surfaces the gap
+      where someone can fix it.
+    * **Several clinics → ALLOW**, resolved by `requesting_org_guid`.
 
-    A NULL that is visible is better than a plausible value that is wrong — the
-    same rule #665 applied to `author_org_guid`.
+    The tie-break is NOT invented here, which was the objection to allowing it.
+    It reuses a choice the caller has already been forced to make explicitly:
+
+    * a single-org caller has `requesting_org_guid` auto-filled;
+    * a multi-org caller **must** specify it (#226 — silent first-pick was the
+      antipattern that ticket removed);
+    * and for a non-SU caller the #779 gate has already established that one of
+      the patient's clinic organisations is among the caller's own.
+
+    So in the realistic path there is a definite answer and no guessing. When
+    several organisations remain and none is the requesting one — reachable
+    mainly for an SU admin, who bypasses the #779 gate — this raises
+    `patient_org_ambiguous` rather than picking by `assigned_at` or guid order.
+    Either of those would write an invented rule onto every subsequent datapoint
+    for that patient. Asking for explicitness costs one error; guessing is
+    permanent.
+
+    Raises:
+        PatientOrgUnresolved: with `code` one of `patient_not_found`,
+        `ips_unavailable`, `patient_org_unassigned`, `patient_org_ambiguous`.
+
+    Returns:
+        str: the organisation guid to stamp on the datapoint.
     """
     pairs, status = get_patient_clinic_orgs(patient_guid)
+    if status == 404:
+        raise PatientOrgUnresolved(
+            'patient_not_found',
+            f'Patient {patient_guid} not found in ips.')
     if status != 200:
-        return None
-    orgs = {o for _, o in pairs if o}
+        # Fail closed. An unreachable ips is not permission to write a row
+        # with no organisation on it.
+        raise PatientOrgUnresolved(
+            'ips_unavailable',
+            'Could not reach ips to establish the patient’s organisation; '
+            'try again shortly.')
+
+    clinics = [c for c, _o in pairs if c]
+    orgs = {o for _c, o in pairs if o}
+
+    if not orgs:
+        # Either no clinic assignment at all, or every assigned clinic has a
+        # NULL organisation_guid (#780 found one pointing at an organisation
+        # sso had never issued). Both mean the same thing here.
+        raise PatientOrgUnresolved(
+            'patient_org_unassigned',
+            'This patient has no clinic assignment in ips with an '
+            'organisation, so the organisation required on every datapoint '
+            'cannot be determined. Assign the patient to a clinic before '
+            'requesting data collection.',
+            clinics=clinics)
+
     if len(orgs) == 1:
-        return orgs.pop()
-    if len(orgs) > 1:
+        return next(iter(orgs))
+
+    if requesting_org_guid and requesting_org_guid in orgs:
         current_app.logger.info(
-            "patient %s resolves to %d organisations %s — recording none, "
-            "because choosing would be a guess (#774)",
-            patient_guid, len(orgs), sorted(orgs))
-    return None
+            "patient %s is affiliated with %d organisations; recording the "
+            "requesting one (%s) per the 2026-10-07 decision",
+            patient_guid, len(orgs), requesting_org_guid)
+        return requesting_org_guid
+
+    raise PatientOrgUnresolved(
+        'patient_org_ambiguous',
+        'This patient is affiliated with several organisations and none of '
+        'them is the requesting organisation, so which one this request is '
+        'made under cannot be determined. Specify requesting_org_guid as one '
+        'of the patient’s organisations.',
+        orgs=orgs, clinics=clinics)

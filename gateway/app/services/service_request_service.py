@@ -93,14 +93,40 @@ def create_service_request(patient_guid, plan_definition_guid, user_guid, org_gu
     # #774/#768: the organisation the PATIENT is affiliated with in ips, taken
     # NOW because ips keeps no assignment history — `patient_clinic_assignments`
     # has `assigned_at` and no end timestamp, so asking later returns today's
-    # answer for an old request. None rather than a guess when the patient has
-    # no clinic, several resolving to different organisations, or a clinic with
-    # no organisation_guid.
+    # answer for an old request.
     #
     # Deliberately NOT `org_guid` below: that is the REQUESTER. Operator,
     # 2026-10-06: "requesting clinic is not the same as the patient affiliation
     # clinic." Two columns because they are two facts.
-    patient_org_guid = patient_service.resolve_patient_org_guid(patient_guid)
+    #
+    # Operator 2026-10-07: this REFUSES rather than storing NULL. #735 requires
+    # the organisation on every datapoint, and a row without it is both
+    # non-compliant and invisible to every org-scoped reader — collected, then
+    # unreadable by whoever collected it. Several organisations resolve by
+    # requesting_org_guid, which #226 already forces a multi-org caller to state
+    # explicitly, so the tie-break is the caller's own declaration rather than
+    # a rule invented here.
+    try:
+        patient_org_guid = patient_service.resolve_patient_org_guid(
+            patient_guid, requesting_org_guid=org_guid)
+    except patient_service.PatientOrgUnresolved as e:
+        log_event(
+            user_guid=user_guid,
+            action='service_request.create.refused',
+            resource_type='ServiceRequest',
+            data_subject_guid=patient_guid,
+            details={**e.as_details(),
+                     'plan_definition_guid': plan_definition_guid,
+                     'requesting_org_guid': org_guid},
+            ip_address=ip_address,
+        )
+        # 404 for an unknown patient and 502 for an unreachable ips keep the
+        # meanings the #779 gate already established on this route; the two
+        # genuinely new refusals are 409, because the request is well-formed
+        # and the platform's state is what blocks it.
+        status = {'patient_not_found': 404,
+                  'ips_unavailable': 502}.get(e.code, 409)
+        return {'code': e.code, 'message': e.message}, status
 
     sr = ServiceRequest(
         status='draft',
