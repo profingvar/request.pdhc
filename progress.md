@@ -1284,10 +1284,7 @@ worth its own ticket.
 
     cd ~/T7_sidewinder/request.pdhc/gateway && PYTHONPATH=. .venv/bin/pytest tests/ -q
 
-### NOT DEPLOYED
-
-Local only. This widens authorisation — it starts admitting callers currently
-denied — so the deploy is a separate decision.
+### DEPLOYED 2026-10-07 08:35 UTC
 
 ## #768/#735 decisions implemented (2026-10-07)
 
@@ -1359,8 +1356,91 @@ The 3 are the same **pre-existing** `test_blocks_filter.py::TestServiceLayer`
 cross-test pollution failures (`assert total == 2` gets 10), verified against
 the untouched tree. They want their own ticket.
 
-### NOT DEPLOYED
+### DEPLOYED 2026-10-07 08:35 UTC — together with #779
 
-Local only, and this one changes behaviour a user will notice: a ServiceRequest
-for a patient with no clinic assignment now fails where it used to succeed. 28
-of ips's 150 patients are in that state.
+
+## Deploy of #779 + #768 to miserver (2026-10-07 08:35 UTC)
+
+**The deploy route had to change, and the reason is worth recording.**
+`/usr/local/www/request.pdhc/` is a **flat git checkout**, not the §7
+release-symlink layout — and its history has **diverged from local**, not merely
+drifted:
+
+* server HEAD `463633b` ("Auto-close: internal endpoint to complete a
+  ServiceRequest from gateway") **does not exist locally**;
+* local `362ffa2`, `6096601`, `39a58f1`, `e85b15e` **do not exist on the
+  server**;
+* the server carries **15 modified-and-uncommitted files**, two of them the very
+  files this change touches, plus ~15 `.env.bak*` and three `gateway.bak.*`
+  trees.
+
+So neither `git pull` nor a tarball extract was usable: both would have
+destroyed server-only work. Deployed by **copying exactly the three changed
+files**, after proving the divergence did not overlap them.
+
+### The check that made it safe
+
+Each of the three deployed files was fetched from the server and diffed against
+the **local pre-change baseline** (`39a58f1`):
+
+    service_requests.py          IDENTICAL
+    patient_service.py           IDENTICAL
+    service_request_service.py   IDENTICAL
+
+All three matched byte-for-byte, so copying applied this change's diff and
+nothing else. They show as "modified" in the server's `git status` only because
+the server's HEAD is a different commit — the content equals this baseline.
+**Had any differed, the patch would have had to be built from the deployed
+file.** Tests were deliberately NOT deployed: they are not needed at runtime,
+and two test modules are among the server-only edits.
+
+### Preconditions verified before the rebuild
+
+* `service_requests.patient_org_guid` **exists** in prod; alembic head is
+  `d0e1f2a3b4c5` (#774's). **No migration shipped with this deploy.**
+* 27 ServiceRequests, **0 with a patient organisation** — consistent with every
+  one having been created by the SU admin before #774.
+* `COMPOSE_PROJECT_NAME=request` pinned, `docker-compose` v5.1.4.
+
+### Sequence
+
+1. Predeploy backup → `miserver:~/backups/predeploy/request.pdhc/20261007T083356Z/`
+   — tar of `gateway/app` (158 files, verified non-empty), all three originals
+   as `*.before`, `git_head.txt`, `git_status.txt`, and the running image id as
+   the rollback target.
+2. `scp` the three files.
+3. `python3 -m py_compile` each — all OK — **before** any rebuild.
+4. `docker-compose up -d --build app worker`. `--build` is required: the
+   Dockerfile does `COPY . .`, so a plain restart runs the old code from the
+   image.
+5. Verified **in-container**, not on disk: all three markers present, and
+   `PatientOrgUnresolved` **imports and constructs** — proving the module loads
+   rather than merely parses.
+6. Health: `127.0.0.1:9060` 200, `https://request.pdhc.se/api/health` 200
+   `{"database":"connected","status":"ok","version":"b0247a6"}`. Worker back up.
+   Clean logs, alembic head unchanged.
+
+### Rollback
+
+    cd /usr/local/www/request.pdhc
+    B=~/backups/predeploy/request.pdhc/20261007T083356Z
+    cp $B/service_requests.py.before        gateway/app/api/service_requests.py
+    cp $B/patient_service.py.before         gateway/app/services/patient_service.py
+    cp $B/service_request_service.py.before gateway/app/services/service_request_service.py
+    cd gateway && docker-compose up -d --build app worker
+
+### What is now live and user-visible
+
+A ServiceRequest for a patient with **no clinic assignment in ips refuses**
+(409 `patient_org_unassigned`) where it previously succeeded with a NULL
+organisation. **28 of ips's 150 patients are in that state.** Watch for
+`service_request.create.refused` audit rows carrying that code — each one is a
+patient needing a clinic assignment, not a bug.
+
+The #779 gate fix is also live, so a non-SU professional can now create a
+ServiceRequest for a patient in their own organisation. Before today every
+non-SU caller was denied.
+
+**Still NOT done, deliberately:** `_org_filter` in cdr still scopes Rule 24 on
+the performer. Repointing it while `patient_org_guid` is NULL everywhere would
+black out every non-SU read. See #782.
