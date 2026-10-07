@@ -83,8 +83,22 @@ def get_patient_clinic_guids(patient_guid):
     """Return the list of clinic GUIDs a patient is assigned to via
     ips.pdhc PatientClinicAssignment.
 
-    Used by ServiceRequest create to enforce patient-org need-to-know
-    (PDL Ch 4 §§ 1-2; ticket #225).
+    **NOT FOR AUTHORISATION. Use `get_patient_clinic_orgs` for that.**
+
+    These are ips `Clinic.guid` primary keys. An access blob carries sso
+    ORGANISATION guids, and the two spaces are never equal — 0 of ips's 9
+    clinics had `guid == organisation_guid` when measured 2026-10-06. The
+    ServiceRequest create gate used to intersect this return value with
+    `caller_org_ids` and therefore denied every non-SU caller for as long as it
+    existed (#779). It was invisible because all 27 ServiceRequests on the
+    platform were created by an SU admin, who skips the gate.
+
+    As of #779 this function has **no callers**. It is kept because the
+    deployed tree may lag local git, so deleting it here could break a release
+    that still imports it — not because anything should start using it.
+
+    Was used by ServiceRequest create to enforce patient-org need-to-know
+    (PDL Ch 4 §§ 1-2; ticket #225), until #779 corrected the comparison.
 
     Returns:
         (clinic_guids: list[str], status: int)

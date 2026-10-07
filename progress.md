@@ -1209,3 +1209,82 @@ so the direction is safe, but a 500 on user input is a defect in ips.
 
 270 tests pass (10 new). Three pre-existing `test_blocks_filter` failures are
 order-dependent leaks that fail identically at HEAD — verified by stashing.
+
+## #779 — the patient-org gate compared two identifier spaces (2026-10-07)
+
+`POST /ServiceRequest`'s PDL Ch 4 §§ 1-2 gate intersected `caller_org_ids` (sso
+ORGANISATION guids, from the access blob) with ips `Clinic.guid` primary keys.
+Those are never equal: 0 of ips's 9 clinics had `guid == organisation_guid` when
+measured 2026-10-06. So the gate denied **every** non-SU caller.
+
+It was invisible because all 27 ServiceRequests on the platform were created by
+`martin@ingvar.com` with `is_su_admin = true`, and the gate sits inside
+`if not is_su:` — 105 `service_request.create` audit entries, 0 denials (#778).
+
+Fixed by comparing organisation to organisation via
+`patient_service.get_patient_clinic_orgs()` (added in #774). Two details carry
+weight:
+
+* **NULL denies.** `{org for _clinic, org in pairs if org}` — the falsy filter
+  is what stops a nullable `Clinic.organisation_guid` from acting as a
+  wildcard. #780 found a live clinic pointing at an organisation sso had never
+  issued, so an unbridged clinic is not hypothetical.
+* **The audit row now distinguishes two causes of the same 403.**
+  `patient_org_guids` plus `clinics_without_organisation` separate "you are in
+  the wrong organisation" from "this patient's clinic was never bridged to
+  sso". Same refusal, different operator action.
+
+`get_patient_clinic_guids` now has zero callers. Kept, with a
+NOT-FOR-AUTHORISATION warning, because the deployed tree can lag local git and
+a release may still import it.
+
+### The tests confirmed the bug rather than catching it
+
+The module passed 12/12 against a gate that could not match a real patient,
+because the fixtures put CLINIC guids into `organization_ids`:
+
+    CLINIC_A = "clinic-a-guid"
+    _blob(is_su=False, org_ids=[CLINIC_A])
+    get_patient_clinic_guids → ([CLINIC_A, CLINIC_B], 200)
+
+Both sides got the same identifier space, so the intersection matched. Rewritten
+with four distinct constants (`ORG_*` vs `CLINIC_*`), and
+`test_non_admin_with_matching_org_can_create` — which asserted **201** on a
+clinic-guid match — is now `test_a_clinic_guid_in_caller_orgs_does_not_grant_access`
+asserting **403**. Fixing this meant inverting a green assertion.
+
+Proven, not assumed: with the gate stashed, 10 of 15 fail. With it, 15 pass.
+
+### A unit test was calling production
+
+When the gate moved to `get_patient_clinic_orgs`, the tests still patching the
+old name left the REAL lookup in place, and it called
+`https://ips.pdhc.se/api/v1/patients/.../clinics`, which answered 401. The
+tests failed, so nothing passed silently — but a unit run must not depend on a
+production service. New autouse `_no_real_ips_calls` fixture patches
+`patient_service.requests.get` to raise with the URL in the message. It fired
+during the stashed run, which is how we know it works.
+
+### Test results
+
+    tests/test_service_request_create_authz.py     15 passed  (was 12)
+    tests/ (full suite)                           273 passed, 3 failed
+
+The 3 failures are **pre-existing** and unrelated: `test_blocks_filter.py`
+`TestServiceLayer` asserts `total == 2` and gets 10 under cross-test
+pollution. Verified by stashing both changes and re-running the untouched
+tree — same 3 failures, 270 passed. They pass in isolation. Not fixed here;
+worth its own ticket.
+
+### Also: the repo had no venv
+
+`request.pdhc` could not run its own tests. Built `gateway/.venv` from
+`gateway/requirements.txt`. Tests need `PYTHONPATH=.` from `gateway/`, or
+`conftest.py` cannot import `app`:
+
+    cd ~/T7_sidewinder/request.pdhc/gateway && PYTHONPATH=. .venv/bin/pytest tests/ -q
+
+### NOT DEPLOYED
+
+Local only. This widens authorisation — it starts admitting callers currently
+denied — so the deploy is a separate decision.

@@ -106,8 +106,15 @@ def create():
 
     # ---- patient-org authorisation gate ---------------------------
     if not is_su:
-        patient_clinic_guids, ips_status = \
-            patient_service.get_patient_clinic_guids(patient_guid)
+        # #779: compare ORGANISATION to ORGANISATION. This used to call
+        # get_patient_clinic_guids() and intersect caller_org_ids (sso
+        # organisation guids) with ips Clinic.guid values — two identifier
+        # spaces that are never equal. Measured on live ips 2026-10-06: 0 of 9
+        # clinics had guid == organisation_guid, so the gate denied EVERY
+        # non-SU caller. Nobody saw it because all 27 ServiceRequests were
+        # created by an SU admin, for whom this branch never runs.
+        clinic_org_pairs, ips_status = \
+            patient_service.get_patient_clinic_orgs(patient_guid)
         if ips_status == 404:
             log_event(
                 user_guid=caller_user_guid,
@@ -141,7 +148,13 @@ def create():
             return jsonify({'code': 'upstream_error',
                             'message': 'Could not verify patient affiliation; '
                                        'try again shortly.'}), 502
-        if not (caller_org_ids & set(patient_clinic_guids)):
+        # A clinic whose organisation_guid is NULL can never match. The falsy
+        # filter is what makes NULL DENY rather than act as a wildcard, and the
+        # column is nullable, so this is reachable — #780 found a live clinic
+        # pointing at an organisation sso had never issued.
+        patient_org_guids = {org for _clinic, org in clinic_org_pairs if org}
+        unbridged = [c for c, org in clinic_org_pairs if not org]
+        if not (caller_org_ids & patient_org_guids):
             log_event(
                 user_guid=caller_user_guid,
                 action='service_request.create.denied',
@@ -152,7 +165,15 @@ def create():
                     'reason': 'patient_org_mismatch',
                     'plan_definition_guid': plan_definition_guid,
                     'caller_org_ids': sorted(caller_org_ids),
-                    'patient_clinic_guids': sorted(patient_clinic_guids),
+                    'patient_org_guids': sorted(patient_org_guids),
+                    # These two separate "you are in the wrong organisation"
+                    # from "this patient's clinic was never bridged to sso".
+                    # Same 403, different operator action, and without them the
+                    # audit row cannot tell them apart. patient_clinic_guids is
+                    # kept for continuity with rows written before #779.
+                    'patient_clinic_guids': sorted(
+                        c for c, _org in clinic_org_pairs if c),
+                    'clinics_without_organisation': sorted(unbridged),
                 },
             )
             return jsonify({
