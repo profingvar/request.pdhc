@@ -1444,3 +1444,95 @@ non-SU caller was denied.
 **Still NOT done, deliberately:** `_org_filter` in cdr still scopes Rule 24 on
 the performer. Repointing it while `patient_org_guid` is NULL everywhere would
 black out every non-SU read. See #782.
+
+## 2026-10-08 — create page: organisation first, patient list from ips's record
+
+`/service-requests/create`. DEPLOYED (`request_pdhc_app` rebuilt, `/api/health`
+ok).
+
+### What it did, and the two faults
+
+It fetched **every** patient via `GET /fhir/Patient`, filtered them in Python
+on `Patient.managingOrganization`, and offered a **separate** "Requesting
+organisation" control further down the form for chain-of-custody.
+
+1. **The two controls could disagree.** Nothing stopped a caller recording org
+   A for custody while selecting a patient belonging to org B.
+2. **`managingOrganization` is a projection, not the record.** ips treats
+   `PatientClinicAssignment` as authoritative — it is what
+   `GET /api/v1/clinics/<guid>/patients` joins on — and reports a disagreement
+   as `custodian_mismatch` (#792) rather than resolving it silently, because
+   the two drift. It is also single-valued where the assignment is M2M, so a
+   patient in two clinics could only ever match one.
+
+### How bad today: not at all, which is the honest answer
+
+Measured against production **before** changing anything, over 122 assigned
+patients:
+
+| | |
+|---|---|
+| managingOrganization agrees with the assignment | **122** |
+| absent | 0 |
+| disagrees | 0 |
+| assigned to more than one org | 0 |
+
+The old filter hid **nobody**. It was wrong in the way that waits: the
+generator sets `managingOrganization` from the clinic at creation and nothing
+has reassigned a patient since. The first patient moved between clinics, or
+assigned to two, is the one it gets wrong — and the symptom is a clinician
+unable to find their own patient, which reads as "that patient isn't in the
+system".
+
+### What it does now
+
+**One** organisation choice, at the top, doing both jobs: it scopes the patient
+list and it *is* the `requesting_org_guid`. Changing it reloads via GET so the
+list comes back from ips rather than being filtered in the browser.
+
+`_clinics_for_orgs` is the single place the two identifier spaces meet — an SSO
+blob names **organisations** (`affiliations[].care_unit_guid`), ips's endpoint
+is keyed by **clinic**, and `clinics.guid` ≠ `clinics.organisation_guid`.
+Verified live: org `7f003d04…` → clinic `2cc4e9e1…`, different values. A test
+asserts they differ, because conflating them is #779 (a gate that did exactly
+that denied every non-SU caller while twelve tests passed, the fixture having
+fed both sides the same guid).
+
+An organisation owning several clinics has its patients unioned and
+de-duplicated — the caller picked the organisation, not a clinic.
+
+### Unavailable ≠ empty
+
+`PatientListUnavailable` is **raised, never returned**, and the page says so:
+*"This is not 'no patients'"*. A clinician shown an empty selector concludes
+there is nobody to request for; if the truth is that ips could not be asked,
+that is a different problem with a different fix. Conflating them is what let
+this service's own spärr filter hide nothing for months while looking healthy
+(#783). A genuinely empty organisation says *"ips answered"* instead.
+
+The GET scope also refuses an org the caller is not affiliated with, mirroring
+the POST gate, so query-string tampering cannot even **show** another
+organisation's patients.
+
+### Verified live after the rebuild
+
+```
+list_clinics / list_clinic_patients present : True True
+old managingOrganization matcher gone       : True
+clinics from ips                            : 10
+org 7f003d04 -> clinic 2cc4e9e1 (Test Clinic)  DIFFERENT values: True
+assignment-based patients for that clinic   : 122
+unknown clinic                              : raised (not [])
+```
+
+300 tests pass (22 new). `test_blocks_filter.py`'s three service-layer failures
+are pre-existing full-suite ordering pollution — they pass in isolation and
+fail identically with these changes stashed.
+
+### Found on the way: ips #805
+
+`GET /api/v1/clinics/<guid>/patients` answers **500** on a malformed guid, not
+400/404: `Clinic.guid` is a UUID column, so `filter_by` raises at the driver
+before the route's own 404 branch runs. Same shape as the `/analysis-filter`
+bug ips already fixed. Our client handles it safely (any non-200 raises), so
+nothing is broken here — filed as **#805**.
