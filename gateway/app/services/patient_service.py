@@ -65,6 +65,54 @@ def list_clinics():
     return data if isinstance(data, list) else []
 
 
+def _ips_computed(patient_guid, leaf):
+    """GET one of ips's COMPUTED euIPS views for a patient.
+
+    Both `/euips-sections` and `/euips-header` are derived on every call — ips
+    deliberately stores no copy, because a stored copy of a derivable fact is
+    the shape that produced #779 and #771. So this is always current and there
+    is nothing here to cache.
+
+    ips accepts either of its two patient identifiers on these routes, which
+    matters because this service's patient pages carry the FHIR resource id.
+    """
+    try:
+        resp = requests.get(_ips_api(f'/patients/{patient_guid}/{leaf}'),
+                            headers=_headers(), timeout=15)
+    except requests.RequestException as e:
+        raise PatientListUnavailable(f"ips unreachable for {leaf}: {e}") from e
+    if resp.status_code == 404:
+        # ips knows of no such patient. A real answer, not a failure.
+        return None
+    if resp.status_code != 200:
+        raise PatientListUnavailable(
+            f"ips returned {resp.status_code} for {leaf}")
+    data = resp.json()
+    return data if isinstance(data, dict) else None
+
+
+def get_euips_sections(patient_guid):
+    """euIPS section coverage: all 17 headings and the state of each.
+
+    Three states per section, and the middle one is the point: PRESENT,
+    EXPLICITLY_ABSENT ("no known allergies" — which the guideline REQUIRES
+    rather than an empty section), and MISSING. Before ips distinguished them,
+    "nothing recorded" and "the clinician confirmed there is nothing" were the
+    same value.
+    """
+    return _ips_computed(patient_guid, 'euips-sections')
+
+
+def get_euips_header(patient_guid):
+    """euIPS document-header coverage: contacts, insurance, author, custodian.
+
+    `legal_guardian` comes back as `not_applicable` for an adult rather than
+    `missing`, because an adult without a guardian is correct and scoring it
+    as a gap would push a generator toward inventing one.
+    """
+    return _ips_computed(patient_guid, 'euips-header')
+
+
 def get_patient_clinics(patient_guid):
     """The clinics a patient is ASSIGNED to — ips's authoritative answer.
 

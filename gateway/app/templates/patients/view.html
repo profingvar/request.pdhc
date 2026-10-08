@@ -175,6 +175,125 @@
   {% endif %}
 </div>
 
+{#
+  ── euIPS: the 17 section headings ───────────────────────────────────────
+  Computed by ips on every request, never stored — a stored copy of a
+  derivable fact is the shape that produced #779 and #771.
+
+  THREE states per heading, and the middle one is the whole point. The
+  guideline requires a summary to state "no known allergies" rather than leave
+  the section empty, so "nothing was recorded" and "a clinician confirmed
+  there is nothing to report" are different clinical statements. Before ips
+  distinguished them they were the same value.
+#}
+<div class="card" style="margin-top:1rem;">
+  <h2 style="margin-top:0;">euIPS sections</h2>
+
+  {% if euips_error %}
+    <p style="margin:0; padding:0.6rem 0.8rem; border-left:4px solid var(--danger, #b00); background:#fdf4f3;">
+      <strong>The euIPS status could not be read from ips.</strong><br>
+      <span style="font-size:0.88em; color:var(--text-muted);">{{ euips_error }}</span><br>
+      <span style="font-size:0.88em;">This is <em>not</em> "no sections" — the
+      summary has not been assessed, which is different from being empty.</span>
+    </p>
+  {% elif not euips_sections %}
+    <p style="margin:0; color:var(--text-muted);">ips returned no euIPS status for this patient.</p>
+  {% else %}
+    {% set sum = euips_sections.get('summary', {}) %}
+    <p style="margin:0 0 0.8rem;">
+      <strong>{{ euips_sections.get('sections', [])|length }}</strong> headings
+      in the catalogue.
+      {% if euips_sections.get('conformant') %}
+        <span style="color:var(--success, #1a7f37);">All required sections are present or explicitly absent.</span>
+      {% else %}
+        <span style="color:var(--danger, #b00);">Required sections MISSING:
+          {{ euips_sections.get('required_sections_missing', [])|join(', ') }}</span>
+      {% endif %}
+    </p>
+
+    <table>
+      <tr><th style="width:3rem;"></th><th>Heading</th><th style="width:9rem;">Obligation</th><th style="width:11rem;">State</th></tr>
+      {% for sec in euips_sections.get('sections', []) %}
+        {% set st = sec.get('status') %}
+        <tr>
+          <td style="text-align:center;">
+            {% if st == 'PRESENT' %}<span style="color:var(--success, #1a7f37);">&#9679;</span>
+            {% elif st == 'EXPLICITLY_ABSENT' %}<span style="color:#0b7285;">&#9675;</span>
+            {% else %}<span style="color:#b0b0b0;">&#9679;</span>{% endif %}
+          </td>
+          <td>{{ sec.get('title') }}
+            {% if sec.get('resource_types') %}
+              <div style="font-size:0.78em; color:var(--text-muted);">{{ sec.get('resource_types')|join(', ') }}</div>
+            {% endif %}
+          </td>
+          <td style="font-size:0.88em;">{{ sec.get('obligation', '')|replace('_', ' ') }}</td>
+          <td style="font-size:0.88em;">
+            {% if st == 'PRESENT' %}
+              Present
+            {% elif st == 'EXPLICITLY_ABSENT' %}
+              Explicitly absent
+              <div style="font-size:0.9em; color:var(--text-muted);">states "none known" — required by the guideline, not a gap</div>
+            {% else %}
+              <span style="color:var(--text-muted);">Missing</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </table>
+
+    <p style="margin:0.8rem 0 0; font-size:0.84em; color:var(--text-muted);">
+      <strong>"Conformant" is not a claim of EU conformance</strong>, and ips
+      says so on every response
+      ({% if euips_sections.get('codes_verified') %}codes verified{% else %}<code>codes_verified: false</code>{% endif %}).
+      It means every <em>required</em> section is present or explicitly absent.
+      The EHDS implementing acts were not confirmed adopted as of October 2026
+      and the section codes are not verified against a published
+      implementation guide.
+    </p>
+  {% endif %}
+</div>
+
+{#
+  ── euIPS: the document header ───────────────────────────────────────────
+  What makes the bundle a document rather than a pile of resources: who the
+  patient is, who may be contacted, who pays, who authored and attests to it,
+  who keeps it, and in what language and country.
+#}
+{% if euips_header and not euips_error %}
+<div class="card" style="margin-top:1rem;">
+  <h2 style="margin-top:0;">euIPS document header</h2>
+  <p style="margin:0 0 0.8rem;">
+    {% if euips_header.get('complete') %}
+      <span style="color:var(--success, #1a7f37);">Complete.</span>
+    {% else %}
+      <span style="color:var(--danger, #b00);">Missing:
+        {{ euips_header.get('missing', [])|join(', ') }}</span>
+    {% endif %}
+  </p>
+  <table>
+    {% for key, el in (euips_header.get('elements') or {}).items() %}
+      <tr>
+        <th style="width:14rem;">{{ key|replace('_', ' ')|capitalize }}</th>
+        <td>
+          {% if el.get('status') == 'present' %}Present
+          {% elif el.get('status') == 'not_applicable' %}
+            <span style="color:var(--text-muted);">Not applicable</span>
+            {% if el.get('why') %}<div style="font-size:0.84em; color:var(--text-muted);">{{ el.get('why') }}</div>{% endif %}
+          {% else %}<span style="color:var(--danger, #b00);">Missing</span>{% endif %}
+          <div style="font-size:0.78em; color:var(--text-muted);">{{ el.get('where', '') }}</div>
+        </td>
+      </tr>
+    {% endfor %}
+  </table>
+  {% if euips_header.get('custodian_mismatch') %}
+    <p style="margin:0.8rem 0 0; padding:0.6rem 0.8rem; border-left:4px solid var(--danger, #b00); background:#fdf4f3; font-size:0.9em;">
+      <strong>ips reports a custodian mismatch:</strong>
+      {{ euips_header.get('custodian_mismatch') }}
+    </p>
+  {% endif %}
+</div>
+{% endif %}
+
 {# ── Contact persons, language, address, telecom ── #}
 <div class="card" style="margin-top:1rem;">
   <h2 style="margin-top:0;">Contact and demographics</h2>

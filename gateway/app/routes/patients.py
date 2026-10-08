@@ -155,7 +155,23 @@ def view_patient(guid):
             entry['problem'] = _personnummer_problem(val)
         identifiers.append(entry)
 
+    # ── euIPS: all 17 section headings, and the document header ──
+    # Computed by ips on every call, so always current. Failure is reported as
+    # failure: "this section is missing" and "we could not ask" are different
+    # statements about a patient summary.
+    euips_sections, euips_header, euips_error = None, None, None
+    try:
+        euips_sections = patient_service.get_euips_sections(guid)
+        euips_header = patient_service.get_euips_header(guid)
+    except patient_service.PatientListUnavailable as e:
+        euips_error = str(e)
+        current_app.logger.error(
+            'view_patient %s: cannot read euIPS status — %s', str(guid)[:8], e)
+
     return render_template('patients/view.html', patient=data,
+                           euips_sections=euips_sections,
+                           euips_header=euips_header,
+                           euips_error=euips_error,
                            identifiers=identifiers,
                            assignments=assignments,
                            assignment_error=assignment_error,

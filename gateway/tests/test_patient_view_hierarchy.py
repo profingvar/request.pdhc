@@ -201,3 +201,128 @@ class TestThePageRenders:
         body = r.get_data(as_text=True)
         assert "Full FHIR Patient resource" in body
         assert "fi-FI" in body
+
+
+# A catalogue shaped like ips's real response: 17 headings across four
+# obligation levels, with all three states represented.
+SECTIONS_RESP = {
+    "patient_guid": "eaf95fd1-9cc5-4f51-af6f-ae9ec8f6f02b",
+    "sections": (
+        [{"key": "allergies", "title": "Allergies and intolerances",
+          "obligation": "required", "status": "EXPLICITLY_ABSENT",
+          "resource_types": ["AllergyIntolerance"]},
+         {"key": "problems", "title": "Problem list (active conditions)",
+          "obligation": "required", "status": "PRESENT",
+          "resource_types": ["Condition"]},
+         {"key": "medications", "title": "Medication summary",
+          "obligation": "required", "status": "PRESENT",
+          "resource_types": ["MedicationStatement"]}]
+        + [{"key": "r%d" % i, "title": "Recommended %d" % i,
+            "obligation": "recommended", "status": "PRESENT",
+            "resource_types": ["Immunization"]} for i in range(4)]
+        + [{"key": "o%d" % i, "title": "Optional %d" % i,
+            "obligation": "optional", "status": "MISSING",
+            "resource_types": ["Observation"]} for i in range(7)]
+        + [{"key": "e%d" % i, "title": "EU addition %d" % i,
+            "obligation": "eu_addition", "status": "MISSING",
+            "resource_types": ["Flag"]} for i in range(3)]),
+    "summary": {},
+    "required_sections_missing": [],
+    "conformant": True,
+    "codes_verified": False,
+    "disclaimer": "NOT a claim of EU/EHDS conformance",
+}
+
+HEADER_RESP = {
+    "patient_guid": "eaf95fd1-9cc5-4f51-af6f-ae9ec8f6f02b",
+    "elements": {
+        "patient_id": {"status": "present", "where": "Patient.identifier"},
+        "contact_person": {"status": "present",
+                           "where": "RelatedPerson(C) + Patient.contact"},
+        "legal_guardian": {"status": "not_applicable",
+                           "where": "RelatedPerson(GUARD) — minors only",
+                           "why": "patient is an adult, so a guardian would "
+                                  "be invented"},
+        "health_insurance": {"status": "missing", "where": "Coverage"},
+    },
+    "missing": ["health_insurance"],
+    "complete": False,
+    "codes_verified": False,
+    "custodian_mismatch": None,
+}
+
+
+class TestEuipsPanels:
+    """All 17 euIPS headings, and the document header, on the page."""
+
+    def _get(self, client, *, sections=SECTIONS_RESP, header=HEADER_RESP,
+             exc=None):
+        import app.routes.patients as mod
+        patient = {"resourceType": "Patient", "id": RID,
+                   "name": [{"family": "Testsson", "given": ["Eva"]}],
+                   "birthDate": "1958-03-14", "identifier": []}
+        pm = (patch.object(mod.patient_service, "get_euips_sections",
+                           side_effect=exc)
+              if exc else
+              patch.object(mod.patient_service, "get_euips_sections",
+                           return_value=sections))
+        with patch.object(mod.patient_service, "get_patient",
+                          return_value=(patient, 200)), \
+             patch.object(mod.patient_service, "get_patient_clinics",
+                          return_value=[]), \
+             patch.object(mod, "get_upstream_token", return_value=None), \
+             pm, \
+             patch.object(mod.patient_service, "get_euips_header",
+                          return_value=header):
+            return client.get("/patients/" + RID)
+
+    def test_every_one_of_the_17_headings_is_rendered(self, app, client):
+        """The ask was whether the page holds ALL the euIPS headings."""
+        body = self._get(client).get_data(as_text=True)
+        for sec in SECTIONS_RESP["sections"]:
+            assert sec["title"] in body, "missing heading: " + sec["title"]
+        assert "17" in body, "the catalogue size should be stated"
+
+    def test_all_four_obligation_levels_are_shown(self, app, client):
+        body = self._get(client).get_data(as_text=True)
+        for lvl in ("required", "recommended", "optional", "eu addition"):
+            assert lvl in body, lvl
+
+    def test_explicitly_absent_is_distinguished_from_missing(self, app, client):
+        """The distinction the whole three-state design exists for.
+
+        "No allergies recorded" and "a clinician confirmed there are none" are
+        different clinical statements, and the guideline REQUIRES the second
+        rather than an empty section.
+        """
+        body = self._get(client).get_data(as_text=True)
+        assert "Explicitly absent" in body
+        assert "not a gap" in body
+        assert "Missing" in body
+
+    def test_conformance_is_not_claimed_as_eu_conformance(self, app, client):
+        body = self._get(client).get_data(as_text=True)
+        assert "not a claim of EU conformance" in body
+        assert "codes_verified" in body
+
+    def test_the_document_header_lists_its_elements(self, app, client):
+        body = self._get(client).get_data(as_text=True)
+        assert "euIPS document header" in body
+        assert "Contact person" in body
+        assert "Health insurance" in body
+        assert "health_insurance" in body, "the missing element is named"
+
+    def test_an_adult_guardian_reads_not_applicable_not_missing(
+            self, app, client):
+        """Scoring it as a gap would push a generator toward inventing one."""
+        body = self._get(client).get_data(as_text=True)
+        assert "Not applicable" in body
+        assert "would be invented" in body
+
+    def test_a_failure_says_the_summary_was_not_assessed(self, app, client):
+        """"No sections" and "could not ask" are different statements."""
+        body = self._get(client, exc=PatientListUnavailable(
+            "ips returned 503")).get_data(as_text=True)
+        assert "could not be read from ips" in body
+        assert 'is <em>not</em> "no sections"' in body
+        assert "Allergies and intolerances" not in body
