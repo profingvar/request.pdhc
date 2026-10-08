@@ -7,23 +7,228 @@
 {% set names = patient.get('name', []) %}
 {% set name = names[0] if names else {} %}
 
+{#
+  ── Identity ──────────────────────────────────────────────────────────────
+  The personnummer was not shown here at all before, which mattered more than
+  it looks: it is the identifier a clinician recognises a person by, and some
+  patients carry a BROKEN one (#789 produced 15-character values with the
+  century doubled). A page that omits it cannot show that it is wrong.
+#}
 <div class="card">
+  <h2 style="margin-top:0;">Identity</h2>
   <table>
-    <tr><th>ID / GUID</th><td>{{ patient.get('id', '') }}</td></tr>
-    <tr><th>Family Name</th><td>{{ name.get('family', '') }}</td></tr>
-    <tr><th>Given Name(s)</th><td>{{ name.get('given', [])|join(' ') }}</td></tr>
-    <tr><th>Gender</th><td>{{ patient.get('gender', '') }}</td></tr>
-    <tr><th>Birth Date</th><td>{{ patient.get('birthDate', '') }}</td></tr>
-    <tr><th>Active</th><td>{{ patient.get('active', '') }}</td></tr>
-    <tr><th>Marital Status</th><td>{{ patient.get('maritalStatus', {}).get('text', '') }}</td></tr>
-    {% for t in patient.get('telecom', []) %}
-    <tr><th>Telecom ({{ t.get('system', '') }})</th><td>{{ t.get('value', '') }}</td></tr>
+    <tr><th>Family name</th><td>{{ name.get('family', '—') }}</td></tr>
+    <tr><th>Given name(s)</th><td>{{ name.get('given', [])|join(' ') or '—' }}</td></tr>
+    <tr><th>Gender</th><td>{{ patient.get('gender', '—') }}</td></tr>
+    <tr><th>Birth date</th><td>{{ patient.get('birthDate', '—') }}</td></tr>
+    <tr><th>Active</th><td>{{ patient.get('active', '—') }}</td></tr>
+    <tr>
+      <th>FHIR resource id</th>
+      <td><code>{{ patient.get('id', '—') }}</code>
+        <div style="font-size:0.82em; color:var(--text-muted);">
+          This is the identifier in the address bar. ips also keeps a separate
+          platform <code>guid</code> for the same person, and the two are
+          different values — which is why a lookup with one can fail where the
+          other succeeds.
+        </div>
+      </td>
+    </tr>
+    {% for i in identifiers %}
+    <tr>
+      <th>{% if i.system == 'urn:oid:1.2.752.129.2.1.3.1' %}Personnummer{% else %}Identifier{% endif %}</th>
+      <td>
+        <code>{{ i.value }}</code>
+        {% if i.problem %}
+          <div style="margin-top:0.3rem; padding:0.4rem 0.6rem; border-left:3px solid var(--danger, #b00); background:#fdf4f3; font-size:0.86em;">
+            <strong>This identifier is not valid:</strong> {{ i.problem }}.<br>
+            Patients created before the generator was fixed carry a malformed
+            personnummer. It is shown as stored, not corrected — editing it
+            here would change a person's identifier on a guess.
+          </div>
+        {% endif %}
+        <div style="font-size:0.78em; color:var(--text-muted);">{{ i.system }}</div>
+      </td>
+    </tr>
     {% endfor %}
-    {% for a in patient.get('address', []) %}
-    <tr><th>Address</th><td>{{ a.get('line', [])|join(', ') }} {{ a.get('city', '') }} {{ a.get('postalCode', '') }}</td></tr>
-    {% endfor %}
+    {% if not identifiers %}
+    <tr><th>Identifiers</th><td>— none recorded</td></tr>
+    {% endif %}
   </table>
 </div>
+
+{#
+  ── Caregiver and care unit ───────────────────────────────────────────────
+  The point of this section, and why it is two levels rather than one.
+
+  A **vårdenhet** (care unit) is the *spärrgräns* — the boundary a patient's
+  block applies across. A **vårdgivare** (caregiver) is the legal entity above
+  it. Which level an organisation sits at is therefore a legal fact under PDL,
+  not a label, and "organisation: UAS" alone does not say whether you are
+  looking at the entity holding the data or the unit a block would hide it
+  from.
+
+  ips knows only *which* organisation. The hierarchy lives in sso, so the
+  level is resolved there, using the CALLER's own token — this page can never
+  show more of the organisation tree than sso would show them directly.
+#}
+<div class="card" style="margin-top:1rem;">
+  <h2 style="margin-top:0;">Caregiver and care unit</h2>
+
+  {% if assignment_error %}
+    <p style="margin:0 0 0.8rem; padding:0.6rem 0.8rem; border-left:4px solid var(--danger, #b00); background:#fdf4f3;">
+      <strong>The clinic assignment could not be read from ips.</strong><br>
+      <span style="font-size:0.88em; color:var(--text-muted);">{{ assignment_error }}</span><br>
+      <span style="font-size:0.88em;">This is <em>not</em> "no assignment" —
+      do not conclude the patient is unassigned.</span>
+    </p>
+  {% elif not assignments %}
+    <p style="margin:0 0 0.8rem; padding:0.6rem 0.8rem; border-left:4px solid var(--warning, #e8a000); background:#fdf8ef;">
+      <strong>ips records no clinic assignment for this patient.</strong><br>
+      <span style="font-size:0.88em;">ips answered, and the answer is none.
+      A patient with no assignment is invisible to every organisation-scoped
+      reader — collected, and then unreadable by whoever collected them. This
+      is a data problem to fix in ips, not a display gap here.</span>
+    </p>
+  {% endif %}
+
+  {% if hierarchy_error %}
+    <p style="margin:0 0 0.8rem; padding:0.6rem 0.8rem; border-left:4px solid var(--danger, #b00); background:#fdf4f3;">
+      <strong>sso could not be asked where these organisations sit.</strong><br>
+      <span style="font-size:0.88em; color:var(--text-muted);">{{ hierarchy_error }}</span><br>
+      <span style="font-size:0.88em;">The organisation GUIDs below are from
+      ips and are correct; only the caregiver/care-unit <em>level</em> is
+      unresolved.</span>
+    </p>
+  {% endif %}
+
+  {% for h in hierarchy %}
+    {% set r = h.resolved %}
+    <table style="margin-bottom:1rem;">
+      <tr><th style="width:14rem;">ips clinic</th>
+          <td>{{ h.clinic_name or '—' }}<br><code style="font-size:0.85em;">{{ h.clinic_guid }}</code></td></tr>
+      <tr><th>Organisation (from ips)</th>
+          <td><code>{{ h.org_guid }}</code></td></tr>
+      {% if r and r.level != 'unknown' %}
+        <tr><th>Care unit (vårdenhet)</th>
+            <td>
+              {% if r.care_unit %}
+                <strong>{{ r.care_unit.name or '(unnamed)' }}</strong><br>
+                <code style="font-size:0.85em;">{{ r.care_unit.guid }}</code>
+                <div style="font-size:0.8em; color:var(--text-muted);">
+                  This is the <strong>spärrgräns</strong> — the boundary a
+                  patient block applies across.
+                </div>
+              {% else %}
+                — none. The organisation above <em>is</em> the vårdgivare, so
+                there is no unit beneath it to name.
+              {% endif %}
+            </td></tr>
+        <tr><th>Caregiver (vårdgivare)</th>
+            <td>
+              {% if r.care_organisation %}
+                <strong>{{ r.care_organisation.name or '(unnamed)' }}</strong><br>
+                <code style="font-size:0.85em;">{{ r.care_organisation.guid }}</code>
+              {% else %}
+                — not recorded in sso. A care unit whose parent does not
+                resolve is a dangling reference, not an absent caregiver.
+              {% endif %}
+            </td></tr>
+        <tr><th>This organisation is a</th>
+            <td>{{ 'vårdenhet (care unit)' if r.level == 'care_unit' else 'vårdgivare (caregiver)' }}</td></tr>
+      {% elif not hierarchy_error %}
+        <tr><th>Care unit / caregiver</th>
+            <td style="color:var(--warning, #8a5b00);">
+              sso does not know this organisation GUID, so neither level can
+              be named. ips holding an organisation sso never issued is a real
+              condition, not a hypothetical — it was #767 and #780.
+            </td></tr>
+      {% endif %}
+    </table>
+  {% endfor %}
+
+  {#
+    The projection, shown alongside the record rather than instead of it.
+    ips treats PatientClinicAssignment as authoritative and reports a
+    disagreement as `custodian_mismatch` (#792) instead of resolving it
+    silently, because the two drift. Same principle here.
+  #}
+  <table>
+    <tr><th style="width:14rem;">managingOrganization<br>
+        <span style="font-weight:400; font-size:0.8em; color:var(--text-muted);">
+          on the Patient resource — a projection of the assignment, not the record
+        </span></th>
+      <td>
+        {% if managing_guid %}
+          {{ managing_name or '(no display name)' }}<br>
+          <code style="font-size:0.85em;">{{ managing_guid }}</code>
+        {% else %}
+          — not set on the resource
+        {% endif %}
+      </td></tr>
+  </table>
+
+  {% if custodian_mismatch %}
+    <p style="margin:0.8rem 0 0; padding:0.6rem 0.8rem; border-left:4px solid var(--danger, #b00); background:#fdf4f3;">
+      <strong>These two disagree.</strong><br>
+      <span style="font-size:0.9em;">{{ custodian_mismatch }}</span>
+    </p>
+  {% endif %}
+</div>
+
+{# ── Contact persons, language, address, telecom ── #}
+<div class="card" style="margin-top:1rem;">
+  <h2 style="margin-top:0;">Contact and demographics</h2>
+  <table>
+    <tr><th style="width:14rem;">Document language</th>
+        <td>{{ patient.get('language', '—') }}</td></tr>
+    {% for c in patient.get('communication', []) %}
+      {% set codings = (c.get('language') or {}).get('coding', []) %}
+      <tr><th>Communication</th>
+          <td>{{ codings[0].get('code', '—') if codings else '—' }}
+            {% if c.get('preferred') %}<span style="font-size:0.85em; color:var(--text-muted);">(preferred)</span>{% endif %}
+          </td></tr>
+    {% endfor %}
+
+    {% for ct in patient.get('contact', []) %}
+      {% set rels = [] %}
+      {% for rel in ct.get('relationship', []) %}
+        {% for cod in rel.get('coding', []) %}{% set _ = rels.append(cod.get('display') or cod.get('code')) %}{% endfor %}
+      {% endfor %}
+      <tr><th>Contact person</th>
+          <td>
+            {{ (ct.get('name') or {}).get('family', '') }}{% if (ct.get('name') or {}).get('given') %}, {{ (ct.get('name') or {}).get('given', [])|join(' ') }}{% endif %}
+            {% if rels %}<div style="font-size:0.85em; color:var(--text-muted);">{{ rels|join(' / ') }}</div>{% endif %}
+            {% for t in ct.get('telecom', []) %}
+              <div style="font-size:0.88em;">{{ t.get('system', '') }}: {{ t.get('value', '') }}</div>
+            {% endfor %}
+          </td></tr>
+    {% endfor %}
+    {% if not patient.get('contact') %}
+      <tr><th>Contact persons</th><td>— none recorded</td></tr>
+    {% endif %}
+
+    {% for t in patient.get('telecom', []) %}
+      <tr><th>Telecom ({{ t.get('system', '') }})</th><td>{{ t.get('value', '') }}{% if t.get('use') %} ({{ t.get('use') }}){% endif %}</td></tr>
+    {% endfor %}
+    {% for a in patient.get('address', []) %}
+      <tr><th>Address{% if a.get('use') %} ({{ a.get('use') }}){% endif %}</th>
+          <td>{{ a.get('line', [])|join(', ') }} {{ a.get('postalCode', '') }} {{ a.get('city', '') }} {{ a.get('country', '') }}</td></tr>
+    {% endfor %}
+    <tr><th>Marital status</th><td>{{ (patient.get('maritalStatus') or {}).get('text', '—') }}</td></tr>
+  </table>
+</div>
+
+{#
+  The whole resource, verbatim. "All available info" cannot be met by a
+  curated table alone: a field nobody thought to render is invisible, and this
+  page's previous version omitted the personnummer, the language, the contacts
+  and the organisation entirely. The raw view means a new field shows up here
+  the day ips starts writing it, without waiting for this template to catch up.
+#}
+<details class="card" style="margin-top:1rem;">
+  <summary style="cursor:pointer; font-weight:600;">Full FHIR Patient resource (everything ips holds)</summary>
+  <pre style="overflow:auto; font-size:0.82em; margin-top:0.8rem;">{{ patient|tojson(indent=2) }}</pre>
+</details>
 
 <div style="margin-top:1rem; display:flex; gap:0.5rem;">
   <a href="{{ url_for('patients_web.edit_patient', guid=patient.get('id', '')) }}" class="btn btn-primary">Edit</a>

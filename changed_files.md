@@ -593,3 +593,8 @@ Deployed to prod (surgical, checksum-verified). Enables cd-assist patient list t
 | 2026-10-08 | gateway/app/services/patient_service.py | list_clinics + list_clinic_patients + PatientListUnavailable |
 | 2026-10-08 | gateway/app/templates/service_requests/create.html | organisation selector first; patient list scoped; unavailable != empty |
 | 2026-10-08 | gateway/tests/test_create_patient_selector.py | NEW — 22 tests |
+| 2026-10-08 | gateway/app/routes/patients.py | view_patient: assignment + sso hierarchy + identifier shape check |
+| 2026-10-08 | gateway/app/services/care_hierarchy_service.py | NEW — resolves an org guid to vårdgivare/vårdenhet via sso, caller's bearer |
+| 2026-10-08 | gateway/app/services/patient_service.py | get_patient_clinics |
+| 2026-10-08 | gateway/app/templates/patients/view.html | full info + both organisation levels (name and guid) |
+| 2026-10-08 | gateway/tests/test_patient_view_hierarchy.py | NEW — 15 tests |

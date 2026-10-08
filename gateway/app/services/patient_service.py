@@ -65,6 +65,35 @@ def list_clinics():
     return data if isinstance(data, list) else []
 
 
+def get_patient_clinics(patient_guid):
+    """The clinics a patient is ASSIGNED to — ips's authoritative answer.
+
+    ips accepts either of its two patient identifiers here (the platform
+    `guid` or the FHIR `resource_id`), which matters because this service's
+    patient pages are built on the FHIR id. Before that was true the call
+    answered 404 "Patient not found" for a patient who plainly existed.
+
+    An empty list means ips answered and the patient has no assignment — a
+    real and consequential state, since such a patient is invisible to every
+    organisation-scoped reader. It is NOT the same as being unable to ask,
+    which raises.
+    """
+    try:
+        resp = requests.get(_ips_api(f'/patients/{patient_guid}/clinics'),
+                            headers=_headers(), timeout=15)
+    except requests.RequestException as e:
+        raise PatientListUnavailable(
+            f"ips unreachable for patient {str(patient_guid)[:8]}: {e}") from e
+    if resp.status_code == 404:
+        return []
+    if resp.status_code != 200:
+        raise PatientListUnavailable(
+            f"ips returned {resp.status_code} for patient "
+            f"{str(patient_guid)[:8]}/clinics")
+    data = resp.json()
+    return data if isinstance(data, list) else []
+
+
 def list_clinic_patients(clinic_guid):
     """Patients ASSIGNED to a clinic — the authoritative list.
 
