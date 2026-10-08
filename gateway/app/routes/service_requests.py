@@ -46,15 +46,54 @@ def _get_sso_org_name(org_guid):
     return _SSO_ORG_CACHE.get(org_guid)
 
 
-def _patient_matches_org(patient, org_ids):
-    """Check if a patient's managingOrganization matches any of the user's orgs."""
-    managing = patient.get('managingOrganization', {})
-    ref = managing.get('reference', '')
-    # ref is like "Organization/some-guid"
-    if ref.startswith('Organization/'):
-        patient_org = ref.replace('Organization/', '')
-        return patient_org in org_ids
-    return False
+def _clinics_for_orgs(org_ids, *, all_orgs=False):
+    """Map the caller's ORGANISATION guids to ips CLINIC rows.
+
+    The one place the two identifier spaces meet. An SSO access blob names
+    organisations; ips's patient-assignment endpoint is keyed by clinic.
+    `clinics.guid` != `clinics.organisation_guid`, and treating them as one
+    value is #779 — a gate that did exactly that denied every non-SU caller
+    while twelve unit tests passed, because the fixture fed both sides the
+    same guid.
+
+    Returns [{'org_guid', 'clinic_guid', 'name'}], ordered by name. Raises
+    PatientListUnavailable if ips cannot be asked.
+    """
+    clinics = patient_service.list_clinics()
+    wanted = {str(o) for o in (org_ids or [])}
+    out = []
+    for c in clinics:
+        org = str(c.get('organisation_guid') or '')
+        if not org:
+            # A clinic with no organisation cannot be matched to an
+            # affiliation. Skipped rather than shown, since selecting it
+            # would scope a request to an organisation that does not exist.
+            continue
+        if all_orgs or org in wanted:
+            out.append({'org_guid': org,
+                        'clinic_guid': str(c.get('guid') or ''),
+                        'name': c.get('name') or org})
+    out.sort(key=lambda x: (x['name'] or '').lower())
+    return out
+
+
+def _patients_for_clinic(clinic_guid):
+    """The ASSIGNMENT-based patient list for one clinic, from ips.
+
+    Replaces "fetch every patient, then keep the ones whose
+    managingOrganization matches". That asked a projection instead of the
+    record: ips's `PatientClinicAssignment` is the fact, `managingOrganization`
+    is a copy of it that can drift — ips surfaces the disagreement as
+    `custodian_mismatch` (#792) rather than resolving it quietly — and the copy
+    is single-valued where the assignment is many-to-many.
+
+    Measured on production 2026-10-08: all 122 assigned patients currently
+    agree and none is multi-org, so the old filter hid nobody TODAY. It was
+    wrong in the way that waits: the first patient moved between clinics, or
+    assigned to two, is the one it gets wrong, and the symptom is a clinician
+    unable to find their own patient.
+    """
+    return patient_service.list_clinic_patients(clinic_guid)
 
 
 @service_requests_web_bp.route('/service-requests')
@@ -198,25 +237,72 @@ def create_view():
                 return redirect(url_for('service_requests_web.view_detail', guid=data['guid']))
             flash(f"Error: {data.get('message', 'Unknown')}", 'danger')
 
-    # Fetch patients from IPS and filter by organisation
+    # ── The organisation comes FIRST, and it decides the patient list ──
+    #
+    # Previously this page fetched EVERY patient from ips and filtered them in
+    # Python on `Patient.managingOrganization`, while a separate "Requesting
+    # organisation" control further down the form recorded chain-of-custody.
+    # Two problems with that, one of shape and one of substance:
+    #
+    #   * The two controls could disagree. Nothing stopped a caller recording
+    #     org A for custody while selecting a patient belonging to org B.
+    #   * `managingOrganization` is a PROJECTION of the clinic assignment, not
+    #     the record. ips treats `PatientClinicAssignment` as authoritative and
+    #     reports a disagreement as `custodian_mismatch` (#792) rather than
+    #     resolving it silently, exactly because the two drift.
+    #
+    # So there is now ONE organisation choice, at the top, and it does both
+    # jobs: it scopes the patient list and it is the `requesting_org_guid`.
     blob = get_current_access_blob()
     is_su = blob.get('is_su_admin', False) if blob else False
     user_org_ids = _caller_org_ids(blob) if blob else []  # M0 #419
+    caller_org_names_map = _caller_org_names(blob) if blob else {}
 
-    patients_data, ps = patient_service.list_patients()
     patients = []
-    if ps == 200:
-        if isinstance(patients_data, dict) and patients_data.get('resourceType') == 'Bundle':
-            patients = [e.get('resource', e) for e in patients_data.get('entry', [])]
-        elif isinstance(patients_data, list):
-            patients = patients_data
+    patient_list_error = None
+    org_clinics = []
+    selected_org = (request.args.get('org') or '').strip() or None
 
-        # Non-SU users: filter to patients from their organisation(s)
-        if not is_su and user_org_ids:
-            patients = [
-                p for p in patients
-                if _patient_matches_org(p, user_org_ids)
-            ]
+    try:
+        org_clinics = _clinics_for_orgs(user_org_ids, all_orgs=is_su)
+    except patient_service.PatientListUnavailable as e:
+        # An empty selector must never stand in for "we could not ask".
+        patient_list_error = str(e)
+        current_app.logger.error(
+            'create_view: cannot resolve clinics from ips — %s', e)
+
+    # A non-SU caller may only act for an organisation they are affiliated
+    # with. Mirrors the POST gate below rather than trusting the query string.
+    allowed_orgs = {c['org_guid'] for c in org_clinics}
+    if selected_org and not is_su and selected_org not in allowed_orgs:
+        flash('Selected organisation is not one of yours.', 'danger')
+        selected_org = None
+
+    # One affiliation -> no choice to make, so make it for them.
+    if not selected_org and len(org_clinics) == 1:
+        selected_org = org_clinics[0]['org_guid']
+
+    if selected_org and patient_list_error is None:
+        # An organisation can own more than one clinic; union their patients
+        # and de-duplicate, because the caller picked the ORGANISATION.
+        seen = set()
+        try:
+            for c in org_clinics:
+                if c['org_guid'] != selected_org:
+                    continue
+                for pt in _patients_for_clinic(c['clinic_guid']):
+                    g = str(pt.get('guid') or pt.get('id') or '')
+                    if g and g not in seen:
+                        seen.add(g)
+                        patients.append(pt)
+        except patient_service.PatientListUnavailable as e:
+            patients = []
+            patient_list_error = str(e)
+            current_app.logger.error(
+                'create_view: cannot list patients for org %s — %s',
+                str(selected_org)[:8], e)
+        patients.sort(key=lambda x: ((x.get('family_name') or '').lower(),
+                                     (x.get('given_name') or '').lower()))
 
     plandefs_data, _ = plan_definition_service.list_plan_definitions()
     if isinstance(plandefs_data, dict):
@@ -240,21 +326,28 @@ def create_view():
     else:
         forms_list = forms_data if isinstance(forms_data, list) else []
 
-    # Caller affiliations for the requesting-org picker (#226). Multi-
-    # org users must pick explicitly; single-org users see a read-only
-    # hint and the value flows as a hidden input.
-    caller_org_ids_list = _caller_org_ids(blob) if blob else []  # M0 #419
-    caller_org_names_map = _caller_org_names(blob) if blob else {}
+    # The organisation picker (#226) is the SAME control as the patient-list
+    # scope now, so there is one list and one selection. Names prefer the
+    # access blob (what the caller is told they belong to) and fall back to the
+    # ips clinic name, so a mismatch between the two shows up as a name the
+    # caller does not recognise rather than silently resolving.
     caller_orgs = [
-        {'guid': gid, 'name': caller_org_names_map.get(gid) or gid}
-        for gid in caller_org_ids_list
+        {'guid': c['org_guid'],
+         'name': caller_org_names_map.get(c['org_guid']) or c['name']}
+        for c in org_clinics
     ]
+    # De-duplicate: one organisation owning several clinics is one choice.
+    _seen_org = set()
+    caller_orgs = [o for o in caller_orgs
+                   if not (o['guid'] in _seen_org or _seen_org.add(o['guid']))]
 
     import json
     return render_template('service_requests/create.html',
                            patients=patients, plandefs=plandefs, forms=forms_list,
                            plandefs_full_json=json.dumps(plandefs_full),
                            caller_orgs=caller_orgs,
+                           selected_org=selected_org,
+                           patient_list_error=patient_list_error,
                            is_su_admin=is_su)
 
 

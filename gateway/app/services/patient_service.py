@@ -19,6 +19,81 @@ def _ips_url(path=''):
     return f"{base}/fhir/Patient{path}"
 
 
+def _ips_api(path):
+    """Build a URL on ips's own `/api/v1` surface (not the FHIR facade)."""
+    base = current_app.config['IPS_BASE_URL'].rstrip('/')
+    return f"{base}/api/v1{path}"
+
+
+class PatientListUnavailable(RuntimeError):
+    """ips could not be asked which patients belong to a clinic.
+
+    Deliberately NOT the same thing as "this clinic has no patients". A
+    clinician who is shown an empty patient selector concludes there is nobody
+    to request for; if the real answer is "we could not reach ips", that is a
+    different problem with a different fix, and conflating the two is the
+    mistake that let request.pdhc's spärr filter hide nothing for months while
+    looking healthy (see #783, and ips's own auth notes).
+
+    Raised rather than returned so a caller cannot accidentally treat it as a
+    list.
+    """
+
+
+def list_clinics():
+    """Active clinics from ips, each carrying its `organisation_guid`.
+
+    This is the ONLY place the two identifier spaces meet: an SSO access blob
+    names **organisations**, while ips's patient-assignment endpoint is keyed
+    by **clinic**. `clinics.guid` and `clinics.organisation_guid` are different
+    values and comparing them as one is #779 — a gate that did exactly that
+    denied every non-SU caller while twelve unit tests passed, because the
+    fixture fed both sides the same value.
+    """
+    try:
+        resp = requests.get(_ips_api('/clinics'), headers=_headers(), timeout=15)
+    except requests.RequestException as e:
+        raise PatientListUnavailable(f"ips clinics unreachable: {e}") from e
+    if resp.status_code != 200:
+        raise PatientListUnavailable(
+            f"ips returned {resp.status_code} for /clinics"
+            + ("" if current_app.config.get('IPS_API_KEY')
+               else " — this service holds no IPS_API_KEY, so the request was "
+                    "unauthenticated; that is a MISSING CREDENTIAL here, not "
+                    "an ips outage"))
+    data = resp.json()
+    return data if isinstance(data, list) else []
+
+
+def list_clinic_patients(clinic_guid):
+    """Patients ASSIGNED to a clinic — the authoritative list.
+
+    Backed by ips's `PatientClinicAssignment` table, which is the fact. The
+    Patient resource's `managingOrganization` is a PROJECTION of it and may
+    disagree: ips reports such a disagreement as `custodian_mismatch` rather
+    than resolving it silently (#792), precisely because the two can drift.
+
+    Filtering a patient list on `managingOrganization` therefore asks a copy
+    instead of the record. It is also single-valued where the assignment is
+    many-to-many, so a patient assigned to two clinics can only ever match one.
+    """
+    try:
+        resp = requests.get(_ips_api(f'/clinics/{clinic_guid}/patients'),
+                            headers=_headers(), timeout=15)
+    except requests.RequestException as e:
+        raise PatientListUnavailable(
+            f"ips unreachable for clinic {str(clinic_guid)[:8]}: {e}") from e
+    if resp.status_code == 404:
+        # A genuine answer: ips knows of no such clinic.
+        return []
+    if resp.status_code != 200:
+        raise PatientListUnavailable(
+            f"ips returned {resp.status_code} for clinic "
+            f"{str(clinic_guid)[:8]}")
+    data = resp.json()
+    return data if isinstance(data, list) else []
+
+
 def list_patients(params=None):
     """List/search patients from IPS backend."""
     try:

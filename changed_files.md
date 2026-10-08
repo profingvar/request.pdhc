@@ -589,3 +589,7 @@ Deployed to prod (surgical, checksum-verified). Enables cd-assist patient list t
 - gateway/tests/test_service_request_create_authz.py
 - gateway/tests/conftest.py
 - gateway/tests/test_dispatch_trigger.py
+| 2026-10-08 | gateway/app/routes/service_requests.py | org-first scoping; _clinics_for_orgs + _patients_for_clinic replace _patient_matches_org |
+| 2026-10-08 | gateway/app/services/patient_service.py | list_clinics + list_clinic_patients + PatientListUnavailable |
+| 2026-10-08 | gateway/app/templates/service_requests/create.html | organisation selector first; patient list scoped; unavailable != empty |
+| 2026-10-08 | gateway/tests/test_create_patient_selector.py | NEW — 22 tests |

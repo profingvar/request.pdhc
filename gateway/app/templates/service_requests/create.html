@@ -4,52 +4,94 @@
 {% block content %}
 <h1>New ServiceRequest</h1>
 
+{#
+  The ORGANISATION comes first, and it decides which patients are offered.
+
+  It used to be the other way round: the patient select listed every patient
+  in ips filtered on `managingOrganization`, and a separate "Requesting
+  organisation" control sat further down for chain-of-custody. Nothing stopped
+  the two disagreeing — recording org A for custody while picking a patient
+  belonging to org B — and the filter asked a projection
+  (`managingOrganization`) instead of the record (`PatientClinicAssignment`).
+
+  One choice now does both jobs. Changing it reloads the page via GET so the
+  patient list comes back from ips for that organisation, rather than being
+  filtered in the browser from a list the server already decided.
+#}
+<form method="GET" action="{{ url_for('service_requests_web.create_view') }}"
+      style="max-width:40rem;" id="org-scope-form">
+  <div class="form-group">
+    <label for="org">Organisation{% if is_su_admin %} (all — you are SU admin){% endif %}</label>
+    {% if caller_orgs and caller_orgs|length > 1 %}
+      <select name="org" id="org" class="form-control"
+              onchange="document.getElementById('org-scope-form').submit();">
+        <option value="">-- Select organisation --</option>
+        {% for o in caller_orgs %}
+          <option value="{{ o.guid }}" {% if o.guid == selected_org %}selected{% endif %}>{{ o.name }}</option>
+        {% endfor %}
+      </select>
+      <p style="font-size:0.85em; color:var(--text-muted); margin-top:0.4rem;">
+        You are affiliated with several organisations. The one you pick both
+        scopes the patients below and is recorded as the requesting
+        organisation (Lag 2022:913 chain-of-custody).
+      </p>
+    {% elif caller_orgs and caller_orgs|length == 1 %}
+      <p style="font-size:0.92em; color:var(--text-muted); margin:0;">
+        {{ caller_orgs[0].name }}
+      </p>
+    {% else %}
+      <p style="font-size:0.9em; color:var(--danger, #b00); margin:0;">
+        No organisation affiliation found, so no patients can be offered.
+      </p>
+    {% endif %}
+  </div>
+</form>
+
 <form method="POST" action="{{ url_for('service_requests_web.create_view') }}" style="max-width:40rem;">
+  {# The scoping choice IS the chain-of-custody value. #}
+  <input type="hidden" name="requesting_org_guid" value="{{ selected_org or '' }}">
+
   <div class="form-group">
     <label for="patient_guid">Patient</label>
-    <select name="patient_guid" id="patient_guid" class="form-control" required>
-      <option value="">-- Select patient --</option>
-      {% for p in patients %}
-        {% set pid = p.get('id', '') %}
-        {% set names = p.get('name', []) %}
-        {% if names %}
-          {% set n = names[0] %}
-          {% set display = n.get('family', '') ~ ', ' ~ n.get('given', [''])|join(' ') %}
-        {% else %}
-          {% set display = pid %}
+    {% if patient_list_error %}
+      {#
+        An empty selector must never stand in for "we could not ask ips".
+        A clinician shown an empty list concludes there is nobody to request
+        for; if the truth is that ips was unreachable, that is a different
+        problem with a different fix. Same reasoning as #783.
+      #}
+      <p style="margin:0; padding:0.6rem 0.8rem; border-left:4px solid var(--danger, #b00); background:#fdf4f3;">
+        <strong>The patient list could not be loaded from ips.</strong><br>
+        <span style="font-size:0.88em; color:var(--text-muted);">{{ patient_list_error }}</span><br>
+        <span style="font-size:0.88em;">This is <em>not</em> "no patients" — do
+        not conclude the organisation has none. Retry, or tell an operator.</span>
+      </p>
+    {% elif not selected_org %}
+      <p style="font-size:0.9em; color:var(--text-muted); margin:0;">
+        Pick an organisation above to see its patients.
+      </p>
+    {% else %}
+      <select name="patient_guid" id="patient_guid" class="form-control" required>
+        <option value="">-- Select patient --</option>
+        {% for p in patients %}
+          {% set pid = p.get('guid', p.get('id', '')) %}
+          {% set fam = p.get('family_name', '') %}
+          {% set giv = p.get('given_name', '') %}
+          {% set display = (fam ~ ', ' ~ giv) if (fam or giv) else pid %}
+          <option value="{{ pid }}">{{ display }}{% if p.get('birth_date') %} ({{ p.get('birth_date') }}){% endif %}</option>
+        {% endfor %}
+      </select>
+      <p style="font-size:0.85em; color:var(--text-muted); margin-top:0.4rem;">
+        {{ patients|length }} patient{{ '' if patients|length == 1 else 's' }}
+        assigned to this organisation in ips.
+        {% if patients|length == 0 %}
+          ips answered, and the answer is that none are assigned — a patient
+          with no assignment is invisible to every organisation-scoped reader,
+          which is a data problem to fix in ips rather than here.
         {% endif %}
-        {% set org_ref = p.get('managingOrganization', {}).get('display', '') %}
-        {% if not org_ref %}
-          {% set org_ref = p.get('managingOrganization', {}).get('reference', '')|replace('Organization/', '') %}
-        {% endif %}
-        <option value="{{ pid }}">{{ display }} ({{ p.get('birthDate', '') }}){% if org_ref %} — {{ org_ref }}{% endif %}</option>
-      {% endfor %}
-    </select>
+      </p>
+    {% endif %}
   </div>
-
-  {% if caller_orgs and caller_orgs|length > 1 %}
-  <div class="form-group">
-    <label for="requesting_org_guid">Requesting organisation</label>
-    <select name="requesting_org_guid" id="requesting_org_guid" class="form-control" required>
-      <option value="">-- Select organisation --</option>
-      {% for o in caller_orgs %}
-        <option value="{{ o.guid }}">{{ o.name }}</option>
-      {% endfor %}
-    </select>
-    <p style="font-size:0.85em; color:var(--text-muted); margin-top:0.4rem;">
-      You belong to multiple organisations. Pick the one acting on
-      this request (Lag 2022:913 chain-of-custody).
-    </p>
-  </div>
-  {% elif caller_orgs and caller_orgs|length == 1 %}
-  <input type="hidden" name="requesting_org_guid" value="{{ caller_orgs[0].guid }}">
-  <div class="form-group">
-    <label>Requesting organisation</label>
-    <p style="font-size:0.92em; color:var(--text-muted); margin:0;">
-      {{ caller_orgs[0].name }}
-    </p>
-  </div>
-  {% endif %}
 
   <div class="form-group">
     <label for="plan_definition_guid">PlanDefinition</label>
