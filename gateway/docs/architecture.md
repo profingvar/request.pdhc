@@ -201,7 +201,7 @@ Delivery receipt for a pushed SR.
 ### 4.6 CarePlan (`care_plans`)
 
 FHIR R5 CarePlan — the patient-specific instance of a PlanDefinition (since
-#310). Observations reference a CarePlan via `basedOn[]`; the chain
+(#310). Observations reference a CarePlan via `basedOn[]`; the chain
 `Observation → CarePlan → PlanDefinition → Transaction → Concept` is the
 canonical provenance.
 
