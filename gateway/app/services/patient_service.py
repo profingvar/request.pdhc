@@ -41,7 +41,7 @@ class PatientListUnavailable(RuntimeError):
 
 
 class IdentifierCheckUnavailable(RuntimeError):
-    """ips could not be asked whether an identifier is valid (#812).
+    """ips could not be asked whether an identifier is valid (#813).
 
     A THIRD state, distinct from both "valid" and "invalid", and the reason
     this is an exception rather than a None.

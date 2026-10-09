@@ -34,7 +34,7 @@ ORGS = [{"care_organisation_guid": PARENT_ORG,
 class TestPersonnummerShapeCheck:
     """The LOCAL pre-check: shape only, no arithmetic.
 
-    The checksum is ips's, and is now asked for over HTTP (#812). This class
+    The checksum is ips's, and is now asked for over HTTP (#813). This class
     covers only what can be judged without a round trip, so a doubled-century
     value is still named when ips cannot be reached.
 

@@ -1539,7 +1539,7 @@ nothing is broken here — filed as **#805**.
 
 ---
 
-## 2026-10-09 — #812: the personnummer verdict comes from ips
+## 2026-10-09 — #813: the personnummer verdict comes from ips
 
 `_personnummer_problem` is now `_personnummer_shape_problem` and does shape
 only. The arithmetic — the Luhn digit, and whether the identifier agrees with
@@ -1560,7 +1560,7 @@ the false claim in writing; it and the matching test docstring are corrected.
 
 Restoring the local check was the wrong fix — it would reinstate a second
 implementation of a rule ips owns. ips grew `POST /api/v1/patients/validate-
-identifier` (#812) and this service asks it.
+identifier` (#813) and this service asks it.
 
 ### Three states, and the third is the point
 

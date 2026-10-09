@@ -24,7 +24,7 @@ def _personnummer_shape_problem(value):
     wrong LENGTH is unambiguous and needs no arithmetic.
 
     The arithmetic — the Luhn digit, and whether the identifier agrees with the
-    patient's birth date — is ips's, and is asked for over HTTP (#812). This
+    patient's birth date — is ips's, and is asked for over HTTP (#813). This
     function deliberately does NOT compute a check digit: the version that did
     was wrong, and the second implementation of a rule is how two services
     start disagreeing about the same patient.
@@ -136,7 +136,7 @@ def view_patient(guid):
 
     # ── is the personnummer actually valid? ──
     identifiers = []
-    # #812: the personnummer verdict comes from ips, which owns the rule.
+    # #813: the personnummer verdict comes from ips, which owns the rule.
     #
     # Three states, and the third is the point: valid, invalid-with-a-reason,
     # and `unverified` — "we could not ask". request.pdhc previously had its
