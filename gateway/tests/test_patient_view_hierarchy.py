@@ -19,7 +19,7 @@ import pytest
 from app.services import care_hierarchy_service, patient_service
 from app.services.care_hierarchy_service import HierarchyUnavailable
 from app.services.patient_service import PatientListUnavailable
-from app.routes.patients import _personnummer_problem
+from app.routes.patients import _personnummer_shape_problem
 
 RID = "612a2995-f95a-4efb-8f6e-e203d339ac5a"
 UNIT_ORG = "7d55624c-1571-44b8-849d-ea5ff0cc1563"
@@ -32,21 +32,34 @@ ORGS = [{"care_organisation_guid": PARENT_ORG,
 
 
 class TestPersonnummerShapeCheck:
-    """Shape only. The checksum is ips's job and mine was WRONG."""
+    """The LOCAL pre-check: shape only, no arithmetic.
+
+    The checksum is ips's, and is now asked for over HTTP (#812). This class
+    covers only what can be judged without a round trip, so a doubled-century
+    value is still named when ips cannot be reached.
+
+    **Correcting the note that used to be here.** It said the local Luhn check
+    had been WRONG, because it flagged `19610115-9638` — "which ips's own
+    generator produced". Both halves of that were false: that value is a
+    hand-written fixture in ips's `test_euips_header.py`, and ips's own
+    validator rejects it. The local check had been RIGHT, and was deleted on a
+    false premise, leaving this page silent about broken identifiers. The right
+    fix was never to restore it but to ask the service that owns the rule.
+    """
 
     def test_the_real_broken_value_is_flagged(self):
         """1919580314-8691 is on a live patient: "19" + "19580314"."""
-        p = _personnummer_problem("1919580314-8691")
+        p = _personnummer_shape_problem("1919580314-8691")
         assert p and "15 characters" in p
 
     @pytest.mark.parametrize("ok", ["19580314-8691", "19610115-9638",
                                     "580314-8691"])
-    def test_well_formed_values_are_not_accused(self, ok):
-        """An earlier version computed Luhn here and got it wrong, reporting
-        19610115-9638 — which ips's own generator produced — as invalid.
-        Telling a clinician a real identifier is broken is worse than saying
-        nothing, so there is no checksum here to disagree with ips."""
-        assert _personnummer_problem(ok) is None
+    def test_well_SHAPED_values_pass_the_shape_check(self, ok):
+        """These are the right SHAPE. Two of them fail ips's checksum, and
+        that is ips's verdict to give — this function must not pre-empt it,
+        in either direction.
+        """
+        assert _personnummer_shape_problem(ok) is None
 
 
 class TestHierarchyResolution:

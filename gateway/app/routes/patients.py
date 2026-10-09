@@ -14,26 +14,20 @@ PERSONNUMMER_SYSTEM = 'urn:oid:1.2.752.129.2.1.3.1'
 _PNR_RE = re.compile(r'^(?:\d{8}|\d{6})-\d{4}$')
 
 
-def _personnummer_problem(value):
-    """A SHAPE problem with the value, or None. Deliberately not a checksum.
+def _personnummer_shape_problem(value):
+    """A SHAPE problem with the value, or None.
 
-    An earlier version of this computed the Luhn check digit here and got it
-    wrong — it reported "check digit does not match" for 19610115-9638, a
-    number ips's own generator produced and considers valid. Telling a
-    clinician that a real patient's identifier is invalid is worse than saying
-    nothing about it, so the checksum is gone rather than debugged.
+    Kept as a LOCAL pre-check, not as the verdict. It catches the fault
+    actually present in this data without a round trip: #789 produced
+    15-character values with the century doubled ("19" + "19580314" ->
+    1919580314-8691), and patients created before the fix still carry them. A
+    wrong LENGTH is unambiguous and needs no arithmetic.
 
-    ips owns the authoritative check (`gateway/app/services/personnummer.py`,
-    #789) and this service should ask it rather than keep a second
-    implementation that can disagree — two implementations of one rule is the
-    shape that cost #784 and #786 a day each. There is no endpoint for it
-    today; until there is, this reports only what can be judged without
-    arithmetic.
-
-    That is still worth doing, because it catches the fault actually present
-    in the data: #789 produced 15-character values with the century doubled
-    ("19" + "19580314" -> 1919580314-8691), and patients created before the
-    fix still carry them. A wrong LENGTH is unambiguous.
+    The arithmetic — the Luhn digit, and whether the identifier agrees with the
+    patient's birth date — is ips's, and is asked for over HTTP (#812). This
+    function deliberately does NOT compute a check digit: the version that did
+    was wrong, and the second implementation of a rule is how two services
+    start disagreeing about the same patient.
     """
     v = (value or '').strip()
     if not _PNR_RE.match(v):
@@ -142,18 +136,48 @@ def view_patient(guid):
 
     # ── is the personnummer actually valid? ──
     identifiers = []
+    # #812: the personnummer verdict comes from ips, which owns the rule.
+    #
+    # Three states, and the third is the point: valid, invalid-with-a-reason,
+    # and `unverified` — "we could not ask". request.pdhc previously had its
+    # own Luhn check, it disagreed with ips, and deleting it left the page
+    # silent about a broken identifier. Silence reads as "fine".
+    #
+    # The shape pre-check runs locally first, so the doubled-century values
+    # #789 produced are named even when ips cannot be reached.
+    pnr_birth = data.get('birthDate') or None
     for ident in (data.get('identifier') or []):
         val = ident.get('value') or ''
         entry = {'system': ident.get('system') or '', 'value': val,
-                 'problem': None}
+                 'problem': None, 'unverified': None}
         if entry['system'] == PERSONNUMMER_SYSTEM and val:
-            # #789 produced 15-character values with the century doubled
-            # ("19" + "19580314"), whose check digit was right about 10% of
-            # the time by chance. Patients created before that fix still
-            # carry them, so the page checks rather than displaying a broken
-            # identifier as though it were fine.
-            entry['problem'] = _personnummer_problem(val)
+            entry['problem'] = _personnummer_shape_problem(val)
         identifiers.append(entry)
+
+    # One call for every personnummer on the record whose shape already passed
+    # — a malformed length needs no checksum, and asking about it would only
+    # restate what we know.
+    to_check = [i for i in identifiers
+                if i['system'] == PERSONNUMMER_SYSTEM and i['value']
+                and not i['problem']]
+    if to_check:
+        try:
+            results = patient_service.validate_identifiers(
+                [{'value': i['value'], 'birth_date': pnr_birth}
+                 for i in to_check])
+            for entry, res in zip(to_check, results):
+                if not res.get('valid'):
+                    entry['problem'] = (res.get('problem')
+                                        or 'ips reports this identifier as '
+                                           'not valid')
+        except patient_service.IdentifierCheckUnavailable as e:
+            # Reported, never swallowed. The identifier is shown as stored and
+            # marked as unchecked, so nobody reads the absence of a warning as
+            # a clean bill of health.
+            current_app.logger.warning(
+                'personnummer validation unavailable: %s', e)
+            for entry in to_check:
+                entry['unverified'] = str(e)
 
     # ── euIPS: all 17 section headings, and the document header ──
     # Computed by ips on every call, so always current. Failure is reported as

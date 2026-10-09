@@ -1,0 +1,5 @@
+- 2026-10-09 gateway/app/services/patient_service.py — validate_identifiers + IdentifierCheckUnavailable (#812)
+- 2026-10-09 gateway/app/routes/patients.py — _personnummer_problem -> _personnummer_shape_problem; verdict from ips; third `unverified` state
+- 2026-10-09 gateway/app/templates/patients/view.html — renders invalid vs unverified distinctly
+- 2026-10-09 gateway/tests/test_personnummer_asks_ips.py (NEW)
+- 2026-10-09 gateway/tests/test_patient_view_hierarchy.py — renamed import; corrected the false note

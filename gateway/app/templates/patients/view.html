@@ -44,6 +44,20 @@
             Patients created before the generator was fixed carry a malformed
             personnummer. It is shown as stored, not corrected — editing it
             here would change a person's identifier on a guess.
+            <br><span style="color:var(--text-muted)">Checked by ips.pdhc,
+            which owns the rule.</span>
+          </div>
+        {% elif i.unverified %}
+          {#
+            #812: the THIRD state. Not valid, not invalid — unknown. Rendered
+            distinctly and never as silence, because an identifier with no
+            remark reads as one that passed.
+          #}
+          <div style="margin-top:0.3rem; padding:0.4rem 0.6rem; border-left:3px solid var(--warning, #b58900); background:#fffaf0; font-size:0.86em;">
+            <strong>Not checked.</strong> ips.pdhc could not be asked whether
+            this personnummer is valid, so it is shown as stored and
+            unverified — this is not a statement that it is correct.<br>
+            <span style="color:var(--text-muted)">{{ i.unverified }}</span>
           </div>
         {% endif %}
         <div style="font-size:0.78em; color:var(--text-muted);">{{ i.system }}</div>

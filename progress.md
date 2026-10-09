@@ -1536,3 +1536,71 @@ fail identically with these changes stashed.
 before the route's own 404 branch runs. Same shape as the `/analysis-filter`
 bug ips already fixed. Our client handles it safely (any non-200 raises), so
 nothing is broken here — filed as **#805**.
+
+---
+
+## 2026-10-09 — #812: the personnummer verdict comes from ips
+
+`_personnummer_problem` is now `_personnummer_shape_problem` and does shape
+only. The arithmetic — the Luhn digit, and whether the identifier agrees with
+the patient's `birth_date` — is asked of ips over HTTP via
+`patient_service.validate_identifiers`.
+
+### Why, and the correction behind it
+
+This service used to have its own Luhn check. It was deleted earlier today
+because it flagged `19610115-9638`, which I stated was generator output that
+ips considered valid. **Both halves were false**: that value is a hand-written
+fixture in ips's `tests/test_euips_header.py`, and ips's own validator rejects
+it (`build("1961-01-15")` yields `19610115-1873`; a fresh pool is 30/30 valid).
+
+So the check had been correct, and deleting it left this page showing a
+checksum-broken personnummer with no remark. The docstring left behind asserted
+the false claim in writing; it and the matching test docstring are corrected.
+
+Restoring the local check was the wrong fix — it would reinstate a second
+implementation of a rule ips owns. ips grew `POST /api/v1/patients/validate-
+identifier` (#812) and this service asks it.
+
+### Three states, and the third is the point
+
+`valid` / `invalid with ips's reason` / **`unverified`**.
+
+`IdentifierCheckUnavailable` is raised on a transport error, any non-200
+(**including 404**, which is what a request.pdhc deployed against an older ips
+receives), non-JSON, or a results list of the wrong length — because all of
+those mean *we do not know*, and a caller that cannot tell "unknown" from
+"valid" renders silence. The page shows an amber "Not checked … this is not a
+statement that it is correct", visually distinct from the red invalid block.
+
+The results length is validated because the caller **zips** them against its
+own list; a short list would shift every verdict onto the wrong identifier.
+
+A shape failure is **not** sent to ips — a doubled-century value needs no
+checksum, and asking would restate what we know. So #789's values are still
+named when ips is unreachable.
+
+### Verified live
+
+```
+  request_pdhc_app -> ips, real wire, real auth:
+    19610115-1873    valid=True
+    19610115-9638    valid=False  "check digit 8; the Luhn digit ... is 7"
+    1919580314-8691  valid=False  "not a personnummer"
+
+  /patients/612a2995 (a REAL patient carrying the #789 value):
+    HTTP 200, identifier shown, flagged invalid, credits ips as the owner
+```
+
+338 tests pass (16 new; 4 verified load-bearing by removing the ips call).
+
+### Pre-existing failures, named rather than waved at
+
+`tests/test_blocks_filter.py::TestServiceLayer` has 3 failures, identical
+before and after this work, and they pass when that file runs alone.
+`conftest._database` is **session-scoped**: `create_all()` once and
+`drop_all()` only at the end, with no per-test cleanup, so every module's rows
+accumulate in one SQLite file. Those three tests count ServiceRequests globally
+(`data["items"]`, `data["total"]`) and therefore see rows other modules created
+— "assert 8 == 3". Filed separately; not fixed here, because adding per-test
+truncation could perturb the 338 that pass.

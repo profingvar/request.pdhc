@@ -40,6 +40,62 @@ class PatientListUnavailable(RuntimeError):
     """
 
 
+class IdentifierCheckUnavailable(RuntimeError):
+    """ips could not be asked whether an identifier is valid (#812).
+
+    A THIRD state, distinct from both "valid" and "invalid", and the reason
+    this is an exception rather than a None.
+
+    The previous local Luhn check was deleted because it disagreed with ips and
+    told the operator a number was broken when it was not. The opposite failure
+    is just as bad: showing a checksum-broken personnummer with no remark, so a
+    clinician reads silence as "this identifier is fine". "We could not ask" has
+    to be said out loud — the same rule this file's euIPS section block already
+    follows.
+    """
+
+
+def validate_identifiers(items):
+    """Ask ips whether each identifier is valid. ips owns the rule (#789).
+
+    `items` is a list of `{"value": str, "birth_date": str|None}` (a bare
+    string is also accepted). Returns a list of
+    `{"value", "valid", "problem", "normalised"}` in the same order.
+
+    Raises `IdentifierCheckUnavailable` rather than returning anything on a
+    transport error, a non-200, or a response that is not the shape promised —
+    because every one of those means we do not know, and a caller that cannot
+    tell "unknown" from "valid" will render silence.
+
+    This exists so request.pdhc stops carrying a second implementation of the
+    personnummer rule. It had one, it was wrong, and the fix was to delete it
+    with a note saying ips should be asked instead. This is that call.
+    """
+    if not items:
+        return []
+    try:
+        resp = requests.post(
+            _ips_api('/patients/validate-identifier'),
+            json={'identifiers': items}, headers=_headers(), timeout=10)
+    except requests.RequestException as e:
+        raise IdentifierCheckUnavailable(f'ips unreachable: {e}') from e
+    if resp.status_code != 200:
+        # Includes 404, which is what a request.pdhc deployed against an ips
+        # that predates the endpoint will get. That must read as "cannot
+        # verify", not as "valid".
+        raise IdentifierCheckUnavailable(
+            f'ips returned HTTP {resp.status_code}')
+    try:
+        results = resp.json().get('results')
+    except ValueError as e:
+        raise IdentifierCheckUnavailable(f'ips returned non-JSON: {e}') from e
+    if not isinstance(results, list) or len(results) != len(items):
+        raise IdentifierCheckUnavailable(
+            f'ips returned {type(results).__name__} of unexpected length; '
+            f'asked about {len(items)} identifier(s)')
+    return results
+
+
 def list_clinics():
     """Active clinics from ips, each carrying its `organisation_guid`.
 
