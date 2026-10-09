@@ -25,10 +25,26 @@ from app.services import patient_service
 from app.services.patient_service import IdentifierCheckUnavailable
 
 PNR_SYSTEM = "urn:oid:1.2.752.129.2.1.3.1"
+
+#: A personnummer of the right SHAPE whose check digit is deliberately WRONG.
+#:
+#: No test here needs a valid one: ips's verdict is mocked throughout, so this
+#: is only ever a string to carry around and assert on.
+#:
+#: It must STAY invalid. This repo is PUBLIC, and a well-formed personnummer is
+#: a real-person identifier — a synthetic one can coincide with a living
+#: person's, and a public repo is indexed and mirrored. An earlier version of
+#: this file hard-coded a value that ips's `personnummer.build()` produces,
+#: which is checksum-VALID, and it was published before anyone noticed. (The
+#: value itself is deliberately not repeated here.)
+#:
+#: If a test ever genuinely needs a valid number, derive it at runtime from
+#: ips's own `build()` rather than hard-coding one.
+PNR_WELL_SHAPED = "19610115-1874"
 RID = "612a2995-f95a-4efb-8f6e-e203d339ac5a"
 
 
-def _patient(value="19610115-1873", birth="1961-01-15"):
+def _patient(value=PNR_WELL_SHAPED, birth="1961-01-15"):
     return {
         "resourceType": "Patient", "id": RID,
         "birthDate": birth,
@@ -74,9 +90,9 @@ def _render(client, patient, *, validate=None, validate_exc=None):
 
 def test_a_valid_identifier_shows_no_warning(app, client):
     body = _render(client, _patient(), validate=[
-        {"value": "19610115-1873", "valid": True, "problem": None,
-         "normalised": "19610115-1873"}])
-    assert "19610115-1873" in body
+        {"value": PNR_WELL_SHAPED, "valid": True, "problem": None,
+         "normalised": PNR_WELL_SHAPED}])
+    assert PNR_WELL_SHAPED in body
     assert "is not valid" not in body
     assert "Not checked" not in body
 
@@ -152,7 +168,7 @@ def test_the_BIRTH_DATE_is_sent_so_ips_can_check_agreement(app, client):
             st.enter_context(p_)
         client.get(f"/patients/{RID}")
 
-    assert seen["items"] == [{"value": "19610115-1873",
+    assert seen["items"] == [{"value": PNR_WELL_SHAPED,
                               "birth_date": "1961-01-15"}]
 
 
@@ -182,7 +198,7 @@ class TestValidateIdentifiersClient:
         with app.app_context():
             with patch("app.services.patient_service.requests.post", **kw):
                 return patient_service.validate_identifiers(
-                    [{"value": "19610115-1873", "birth_date": None}])
+                    [{"value": PNR_WELL_SHAPED, "birth_date": None}])
 
     def test_a_transport_error_raises(self, app):
         import requests as rq

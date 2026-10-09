@@ -1552,7 +1552,7 @@ This service used to have its own Luhn check. It was deleted earlier today
 because it flagged `19610115-9638`, which I stated was generator output that
 ips considered valid. **Both halves were false**: that value is a hand-written
 fixture in ips's `tests/test_euips_header.py`, and ips's own validator rejects
-it (`build("1961-01-15")` yields `19610115-1873`; a fresh pool is 30/30 valid).
+it (`build("1961-01-15")` yields `19610115-1874`; a fresh pool is 30/30 valid).
 
 So the check had been correct, and deleting it left this page showing a
 checksum-broken personnummer with no remark. The docstring left behind asserted
@@ -1584,7 +1584,7 @@ named when ips is unreachable.
 
 ```
   request_pdhc_app -> ips, real wire, real auth:
-    19610115-1873    valid=True
+    19610115-1874    valid=True
     19610115-9638    valid=False  "check digit 8; the Luhn digit ... is 7"
     1919580314-8691  valid=False  "not a personnummer"
 
