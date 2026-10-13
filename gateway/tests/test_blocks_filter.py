@@ -270,8 +270,19 @@ class TestServiceLayer:
                     is_su_admin=True,
                 )
             assert status == 200
-            assert len(data["items"]) == 2
-            assert all(i["requester_org_guid"] == ORG_OK for i in data["items"])
+            # #810 step 2: assert about the rows THIS test created, not about
+            # a global count. The previous `len(data["items"]) == 2` was an
+            # assertion about the whole table, so any neighbouring module that
+            # committed an SR changed the answer (`assert 8 == 3`). Per-test
+            # truncation now stops the leak; this stops the test depending on
+            # there being no leak.
+            own = {sr.guid for sr in srs}
+            returned = {i["guid"] for i in data["items"]}
+            assert returned & own == {srs[0].guid, srs[2].guid}
+            assert srs[1].guid not in returned, (
+                "an SR whose requester org the patient blocked was returned")
+            assert all(i["requester_org_guid"] == ORG_OK
+                       for i in data["items"] if i["guid"] in own)
             for sr in srs:
                 db.session.delete(sr)
             db.session.commit()
@@ -285,7 +296,12 @@ class TestServiceLayer:
                     is_su_admin=True,
                 )
             assert status == 200
-            assert len(data["items"]) == 3
+            # #810 step 2: own rows, not a global count.
+            own = {sr.guid for sr in srs}
+            returned = {i["guid"] for i in data["items"]}
+            assert own <= returned, (
+                "with no blocks in play every SR this test created must come "
+                f"back; missing {own - returned}")
             for sr in srs:
                 db.session.delete(sr)
             db.session.commit()
@@ -294,6 +310,14 @@ class TestServiceLayer:
         """Exposing the spärr-filtered count would leak 'the patient has
         blocks'. ``total`` must stay the unfiltered query count."""
         with app.app_context():
+            # #810 step 2: `total` is unavoidably a global count — that is the
+            # property under test — so take a BEFORE reading and assert on the
+            # delta rather than on an absolute 2, which only held while this
+            # file ran alone.
+            before, _ = service_request_service.list_service_requests(
+                is_su_admin=True)
+            baseline_total = before["total"]
+
             srs = [
                 _make_sr(requester_org=ORG_OK),
                 _make_sr(requester_org=ORG_BLOCKED),
@@ -303,8 +327,12 @@ class TestServiceLayer:
                 data, status = service_request_service.list_service_requests(
                     is_su_admin=True,
                 )
-            assert data["total"] == 2
-            assert len(data["items"]) == 1
+            assert data["total"] == baseline_total + 2, (
+                "total must be the UNFILTERED count: exposing the "
+                "spärr-filtered one would leak that the patient has blocks")
+            own = {sr.guid for sr in srs}
+            returned = {i["guid"] for i in data["items"]}
+            assert returned & own == {srs[0].guid}
             for sr in srs:
                 db.session.delete(sr)
             db.session.commit()

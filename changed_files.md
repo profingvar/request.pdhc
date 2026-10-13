@@ -598,3 +598,5 @@ Deployed to prod (surgical, checksum-verified). Enables cd-assist patient list t
 | 2026-10-08 | gateway/app/services/patient_service.py | get_patient_clinics |
 | 2026-10-08 | gateway/app/templates/patients/view.html | full info + both organisation levels (name and guid) |
 | 2026-10-08 | gateway/tests/test_patient_view_hierarchy.py | NEW — 15 tests |
+- 2026-10-13 gateway/tests/conftest.py — #810: per-test truncation in db_session (DELETE per table in reverse sorted_tables order)
+- 2026-10-13 gateway/tests/test_blocks_filter.py — #810 step 2: the three TestServiceLayer list tests now assert on their own rows / a total DELTA, not global counts

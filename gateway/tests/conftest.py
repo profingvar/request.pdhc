@@ -122,10 +122,37 @@ def _no_real_ips_calls(request):
 
 @pytest.fixture(autouse=True)
 def db_session(app, _database):
-    """Provide a clean session for each test."""
+    """A session per test, and an EMPTY DATABASE per test (#810).
+
+    The rollback below was already here and is not enough on its own: it
+    cannot undo rows a test COMMITTED, and most tests here commit. `_database`
+    is session-scoped — `create_all()` once at the start, `drop_all()` once at
+    the end — against a FILE (`sqlite:///test_request_pdhc.db`), so committed
+    rows were durable for the whole run and accumulated across modules.
+
+    Three tests in `test_blocks_filter.py::TestServiceLayer` assert on
+    `list_service_requests`'s global counts rather than on rows they created,
+    so any earlier module that committed a ServiceRequest changed their
+    answer: `assert 8 == 3`, `assert 10 == 2`. They passed when that file ran
+    alone and failed in the full suite — the failure was a property of the
+    suite, not of the code under test.
+
+    That is worse than three red lines. A suite whose assertions depend on
+    module order cannot distinguish a real regression from a neighbour's
+    leftovers, and a permanently-red suite stops being read.
+
+    `DELETE` per table in reverse dependency order, not `drop_all()` +
+    `create_all()`: the schema is created once and only the rows go, which is
+    both much faster and keeps the session-scoped `app` fixture valid.
+    `sorted_tables` is SQLAlchemy's topological order, so reversing it deletes
+    children before parents and no foreign key is ever briefly violated.
+    """
     with app.app_context():
         yield _database.session
         _database.session.rollback()
+        for table in reversed(_database.metadata.sorted_tables):
+            _database.session.execute(table.delete())
+        _database.session.commit()
 
 
 @pytest.fixture
