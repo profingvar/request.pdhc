@@ -36,7 +36,13 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-request_admin}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db:5432/${POSTGRES_DB:-request_pdhc}
+      # +psycopg2 is EXPLICIT and load-bearing (#711, #930): a bare
+      # `postgresql://` lets the INSTALLED SQLAlchemy pick the driver, and
+      # 2.1 resolves it to psycopg v3, which is not installed here.
+      # SQLAlchemy==2.0.51 pinned. requirements.txt already EXPLAINS this
+      # mitigation (#785's comment block); the compose did not apply it.
+      # Two occurrences in this file — app and worker.
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-request_admin}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db:5432/${POSTGRES_DB:-request_pdhc}
       FLASK_PORT: "9060"
     ports:
       # Loopback-only. External traffic arrives via nginx
@@ -66,7 +72,13 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-request_admin}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db:5432/${POSTGRES_DB:-request_pdhc}
+      # +psycopg2 is EXPLICIT and load-bearing (#711, #930): a bare
+      # `postgresql://` lets the INSTALLED SQLAlchemy pick the driver, and
+      # 2.1 resolves it to psycopg v3, which is not installed here.
+      # SQLAlchemy==2.0.51 pinned. requirements.txt already EXPLAINS this
+      # mitigation (#785's comment block); the compose did not apply it.
+      # Two occurrences in this file — app and worker.
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-request_admin}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db:5432/${POSTGRES_DB:-request_pdhc}
       FLASK_APP: wsgi:application
     # Override entrypoint.sh — the worker doesn't need to run
     # migrations (the app container does), and shouldn't bind any

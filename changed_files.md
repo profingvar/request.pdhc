@@ -601,3 +601,29 @@ Deployed to prod (surgical, checksum-verified). Enables cd-assist patient list t
 - 2026-10-13 gateway/tests/conftest.py — #810: per-test truncation in db_session (DELETE per table in reverse sorted_tables order)
 - 2026-10-13 gateway/tests/test_blocks_filter.py — #810 step 2: the three TestServiceLayer list tests now assert on their own rows / a total DELTA, not global counts
 - 2026-10-13 gateway/app/config.py — #816: SESSION_COOKIE_SECURE/HTTPONLY/SAMESITE
+
+#930 — bare `postgresql://` DSN converted to `+psycopg2` (2026-11-05)
+---------------------------------------------------------------------
+/Users/martiningvar/T7_sidewinder/request.pdhc/gateway/docker-compose.yml:39
+/Users/martiningvar/T7_sidewinder/request.pdhc/gateway/docker-compose.yml:69
+/Users/martiningvar/T7_sidewinder/request.pdhc/gateway/.env.example:5
+
+TWO in the compose — app AND worker. SQLAlchemy==2.0.51 pinned.
+`requirements.txt` already carried #785's comment block explaining this
+mitigation while the compose did not apply it.
+
+WHY. SQLAlchemy 2.1 resolves a bare `postgresql://` to psycopg **v3** (#711).
+This service installs `psycopg2-binary` and not psycopg v3, so a bare scheme
+lets the INSTALLED SQLAlchemy pick a driver that is absent and the app
+crash-loops on the next `--build`. Verified it passes nothing to a raw
+`psycopg2.connect()` (which cannot parse a `+driver` scheme) — the DSN goes to
+SQLAlchemy only.
+
+NOT DEPLOYED and nothing regresses without it: a config-only compose change
+needs `docker-compose up -d` WITHOUT `--build`. The deployed compose still has
+to be compared (#940) — gateway's deployed copy already said `+psycopg2` while its
+repo copy did not, which is how this drift was found at all.
+
+Guarded by `tools/audit_dsn_drivers.py` (exit 1 on any bare DSN, 20 paired
+tests). The claim "all 21 services now use +psycopg2 explicitly (#711)" was
+false for 11 files; a hand survey cannot be the gate here.
