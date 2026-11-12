@@ -235,3 +235,46 @@ class TestValidateIdentifiersClient:
             with patch("app.services.patient_service.requests.post",
                        side_effect=AssertionError("must not be called")):
                 assert patient_service.validate_identifiers([]) == []
+
+
+
+# ---------------------------------------------------------------------------
+# #990 — the platform policy: synthetic numbers are correct here
+# ---------------------------------------------------------------------------
+
+def test_a_SYNTHETIC_number_shows_a_neutral_note_not_a_warning(app, client):
+    """ips's synthetic numbers carry a WRONG check digit on purpose (#405), so
+    `valid` is False by design. Before #990 this page called every one of
+    them invalid."""
+    body = _render(client, _patient(), validate=[
+        {"value": PNR_WELL_SHAPED, "valid": False, "problem": "check digit ...",
+         "kind": "synthetic", "policy_problem": None, "normalised": PNR_WELL_SHAPED}])
+    assert "Synthetic personnummer" in body
+    assert "is not valid" not in body
+    assert "real person&#39;s personnummer:" not in body and "real person's personnummer:" not in body
+
+
+def test_a_REAL_FORMAT_number_is_the_warning(app, client):
+    body = _render(client, _patient(), validate=[
+        {"value": PNR_WELL_SHAPED, "valid": True, "problem": None,
+         "kind": "real_format", "normalised": PNR_WELL_SHAPED,
+         "policy_problem": "has a CORRECT check digit, so it may be a real person"}])
+    assert "may be a real person" in body
+    assert "synthetic data only" in body
+    assert "Synthetic personnummer" not in body
+
+
+def test_a_synthetic_number_contradicting_the_birth_date_is_still_reported(app, client):
+    body = _render(client, _patient(), validate=[
+        {"value": PNR_WELL_SHAPED, "valid": False, "problem": "x",
+         "kind": "synthetic", "normalised": PNR_WELL_SHAPED,
+         "policy_problem": "encodes a birth date of 1961-01-15 but the patient record says 1972-02-03"}])
+    assert "is not valid" in body and "encodes a birth date" in body
+
+
+def test_an_ips_OLDER_than_990_keeps_the_813_behaviour(app, client):
+    """No `kind` in the answer: do not guess — `valid` False is a problem."""
+    body = _render(client, _patient(), validate=[
+        {"value": PNR_WELL_SHAPED, "valid": False, "problem": "bad digit",
+         "normalised": PNR_WELL_SHAPED}])
+    assert "is not valid" in body and "Synthetic personnummer" not in body

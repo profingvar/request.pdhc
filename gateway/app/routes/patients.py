@@ -149,7 +149,8 @@ def view_patient(guid):
     for ident in (data.get('identifier') or []):
         val = ident.get('value') or ''
         entry = {'system': ident.get('system') or '', 'value': val,
-                 'problem': None, 'unverified': None}
+                 'problem': None, 'unverified': None, 'synthetic': False,
+                 'real_format': False}
         if entry['system'] == PERSONNUMMER_SYSTEM and val:
             entry['problem'] = _personnummer_shape_problem(val)
         identifiers.append(entry)
@@ -166,7 +167,18 @@ def view_patient(guid):
                 [{'value': i['value'], 'birth_date': pnr_birth}
                  for i in to_check])
             for entry, res in zip(to_check, results):
-                if not res.get('valid'):
+                if 'kind' in res:
+                    # #990: ips judges by the PLATFORM POLICY (synthetic
+                    # only, #405). A synthetic number has a WRONG check digit
+                    # on purpose, so `valid` is False by design and must not
+                    # be shown as a defect; a REAL-FORMAT number is the one to
+                    # warn about — it may be a real person's.
+                    entry['synthetic'] = res.get('kind') == 'synthetic'
+                    entry['real_format'] = res.get('kind') == 'real_format'
+                    entry['problem'] = res.get('policy_problem')
+                elif not res.get('valid'):
+                    # An ips older than #990 answers without `kind`: keep the
+                    # #813 behaviour rather than guess.
                     entry['problem'] = (res.get('problem')
                                         or 'ips reports this identifier as '
                                            'not valid')

@@ -627,3 +627,8 @@ repo copy did not, which is how this drift was found at all.
 Guarded by `tools/audit_dsn_drivers.py` (exit 1 on any bare DSN, 20 paired
 tests). The claim "all 21 services now use +psycopg2 explicitly (#711)" was
 false for 11 files; a hand survey cannot be the gate here.
+
+## 2026-11-12 — #990: the patient view reads ips's platform policy for personnummer
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/routes/patients.py
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/templates/patients/view.html
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_personnummer_asks_ips.py

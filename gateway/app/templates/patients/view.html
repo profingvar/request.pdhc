@@ -38,7 +38,17 @@
       <th>{% if i.system == 'urn:oid:1.2.752.129.2.1.3.1' %}Personnummer{% else %}Identifier{% endif %}</th>
       <td>
         <code>{{ i.value }}</code>
-        {% if i.problem %}
+        {% if i.problem and i.real_format %}
+          {# #990: a CORRECT check digit on a synthetic-only platform — it may
+             be a real person's personnummer. The strongest of the warnings. #}
+          <div style="margin-top:0.3rem; padding:0.4rem 0.6rem; border-left:3px solid var(--danger, #b00); background:#fdf4f3; font-size:0.86em;">
+            <strong>This may be a real person's personnummer:</strong> {{ i.problem }}<br>
+            This platform holds synthetic data only (#405, #990). Do not copy
+            or reuse this value; replace it in ips.pdhc.
+            <br><span style="color:var(--text-muted)">Checked by ips.pdhc,
+            which owns the rule.</span>
+          </div>
+        {% elif i.problem %}
           <div style="margin-top:0.3rem; padding:0.4rem 0.6rem; border-left:3px solid var(--danger, #b00); background:#fdf4f3; font-size:0.86em;">
             <strong>This identifier is not valid:</strong> {{ i.problem }}.<br>
             Patients created before the generator was fixed carry a malformed
@@ -46,6 +56,12 @@
             here would change a person's identifier on a guess.
             <br><span style="color:var(--text-muted)">Checked by ips.pdhc,
             which owns the rule.</span>
+          </div>
+        {% elif i.synthetic %}
+          {# #990: correct for this platform — a neutral note, not a warning. #}
+          <div style="margin-top:0.3rem; font-size:0.82em; color:var(--text-muted);">
+            Synthetic personnummer: its check digit is wrong on purpose, so it
+            cannot belong to a real person (#405).
           </div>
         {% elif i.unverified %}
           {#
