@@ -632,3 +632,9 @@ false for 11 files; a hand survey cannot be the gate here.
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/routes/patients.py
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/templates/patients/view.html
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_personnummer_asks_ips.py
+
+## 2026-11-12 — #981: CarePlan routes scoped to the patient's organisation (shared patient_access rule)
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/patient_access.py
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/api/care_plans.py
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/api/service_requests.py
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_care_plans_scope_981.py

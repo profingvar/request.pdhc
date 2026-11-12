@@ -5,6 +5,7 @@ from flask import Blueprint, jsonify, request
 from app.middleware.auth_middleware import requires_auth, requires_role
 from app.services import service_request_service, contract_service, plan_definition_service
 from app.services import patient_service
+from app.services import patient_access
 from app.services.audit_service import audit_read, log_event
 from app.services.auth_service import get_current_user_guid, get_current_access_blob
 from app.services.reform_scope import (
@@ -105,83 +106,32 @@ def create():
             org_choice_mode = 'auto_single_org'
 
     # ---- patient-org authorisation gate ---------------------------
-    if not is_su:
-        # #779: compare ORGANISATION to ORGANISATION. This used to call
-        # get_patient_clinic_guids() and intersect caller_org_ids (sso
-        # organisation guids) with ips Clinic.guid values — two identifier
-        # spaces that are never equal. Measured on live ips 2026-10-06: 0 of 9
-        # clinics had guid == organisation_guid, so the gate denied EVERY
-        # non-SU caller. Nobody saw it because all 27 ServiceRequests were
-        # created by an SU admin, for whom this branch never runs.
-        clinic_org_pairs, ips_status = \
-            patient_service.get_patient_clinic_orgs(patient_guid)
-        if ips_status == 404:
-            log_event(
-                user_guid=caller_user_guid,
-                action='service_request.create.denied',
-                resource_type='ServiceRequest',
-                data_subject_guid=patient_guid,
-                ip_address=request.remote_addr,
-                details={
-                    'reason': 'patient_not_found',
-                    'plan_definition_guid': plan_definition_guid,
-                    'caller_org_ids': sorted(caller_org_ids),
-                },
-            )
-            return jsonify({'code': 'not_found',
-                            'message': f'Patient {patient_guid} not found'}), 404
-        if ips_status >= 500:
-            # Upstream IPS failure — fail closed (do NOT create the SR
-            # without a valid affiliation check). Audit + 502.
-            log_event(
-                user_guid=caller_user_guid,
-                action='service_request.create.denied',
-                resource_type='ServiceRequest',
-                data_subject_guid=patient_guid,
-                ip_address=request.remote_addr,
-                details={
-                    'reason': 'ips_lookup_failed',
-                    'ips_status': ips_status,
-                    'plan_definition_guid': plan_definition_guid,
-                },
-            )
-            return jsonify({'code': 'upstream_error',
-                            'message': 'Could not verify patient affiliation; '
-                                       'try again shortly.'}), 502
-        # A clinic whose organisation_guid is NULL can never match. The falsy
-        # filter is what makes NULL DENY rather than act as a wildcard, and the
-        # column is nullable, so this is reachable — #780 found a live clinic
-        # pointing at an organisation sso had never issued.
-        patient_org_guids = {org for _clinic, org in clinic_org_pairs if org}
-        unbridged = [c for c, org in clinic_org_pairs if not org]
-        if not (caller_org_ids & patient_org_guids):
-            log_event(
-                user_guid=caller_user_guid,
-                action='service_request.create.denied',
-                resource_type='ServiceRequest',
-                data_subject_guid=patient_guid,
-                ip_address=request.remote_addr,
-                details={
-                    'reason': 'patient_org_mismatch',
-                    'plan_definition_guid': plan_definition_guid,
-                    'caller_org_ids': sorted(caller_org_ids),
-                    'patient_org_guids': sorted(patient_org_guids),
-                    # These two separate "you are in the wrong organisation"
-                    # from "this patient's clinic was never bridged to sso".
-                    # Same 403, different operator action, and without them the
-                    # audit row cannot tell them apart. patient_clinic_guids is
-                    # kept for continuity with rows written before #779.
-                    'patient_clinic_guids': sorted(
-                        c for c, _org in clinic_org_pairs if c),
-                    'clinics_without_organisation': sorted(unbridged),
-                },
-            )
-            return jsonify({
-                'code': 'forbidden',
-                'message': ('Patient is not assigned to any clinic in your '
-                            'organisations; create denied per PDL Ch 4 §§ 1-2.'),
-            }), 403
-    else:
+    # #981: the decision is app/services/patient_access.py — ONE rule shared
+    # with the CarePlan routes. This route keeps its own audit actions and
+    # messages; the details are the same fields it always wrote.
+    decision = patient_access.evaluate(blob, patient_guid)
+    if not decision.allowed:
+        log_event(
+            user_guid=caller_user_guid,
+            action='service_request.create.denied',
+            resource_type='ServiceRequest',
+            data_subject_guid=patient_guid,
+            ip_address=request.remote_addr,
+            details={'reason': decision.reason,
+                     'plan_definition_guid': plan_definition_guid,
+                     **decision.details},
+        )
+        messages = {
+            'patient_not_found': f'Patient {patient_guid} not found',
+            'ips_lookup_failed': ('Could not verify patient affiliation; '
+                                  'try again shortly.'),
+            'patient_org_mismatch': ('Patient is not assigned to any clinic in '
+                                     'your organisations; create denied per '
+                                     'PDL Ch 4 §§ 1-2.'),
+        }
+        return jsonify({'code': decision.code,
+                        'message': messages[decision.reason]}), decision.status
+    if decision.is_su:
         # SU admin bypass — auditable.
         log_event(
             user_guid=caller_user_guid,

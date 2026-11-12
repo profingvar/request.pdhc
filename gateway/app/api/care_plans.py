@@ -23,12 +23,46 @@ import bleach
 from flask import Blueprint, jsonify, request
 from app import db
 from app.models.care_plan_models import CarePlan
-from app.middleware.auth_middleware import requires_auth
-from app.services.auth_service import get_current_user_guid
+from app.middleware.auth_middleware import requires_auth, requires_role
+from app.services.auth_service import get_current_user_guid, get_current_access_blob
+from app.services import patient_access
+from app.services.audit_service import audit_read, log_event
 from app.services import context_service
 from app.services import plan_definition_service
 
 care_plans_bp = Blueprint('care_plans_api', __name__)
+
+
+def _gate(patient_guid, verb, care_plan_guid=None):
+    """None when the caller may reach this patient, else the refusal (#981).
+
+    The rule is app/services/patient_access.py — the SAME decision
+    POST /ServiceRequest uses. Every refusal is audited with its reason; a
+    write by an SU admin is audited as a bypass. Reads are audited on success
+    by @audit_read, as the ServiceRequest reads are.
+    """
+    decision = patient_access.evaluate(get_current_access_blob(), patient_guid)
+    if not decision.allowed:
+        log_event(user_guid=get_current_user_guid(),
+                  action=f'care_plan.{verb}.denied', resource_type='CarePlan',
+                  resource_guid=care_plan_guid, data_subject_guid=patient_guid,
+                  ip_address=request.remote_addr,
+                  details={'reason': decision.reason, **decision.details})
+        messages = {
+            'patient_not_found': 'Patient not found',
+            'ips_lookup_failed': 'Could not verify patient affiliation; try again shortly.',
+            'patient_org_mismatch': ('Patient is not assigned to any clinic in your '
+                                     'organisations (PDL Ch 4 §§ 1-2).'),
+        }
+        return jsonify({'code': decision.code,
+                        'message': messages[decision.reason]}), decision.status
+    if decision.is_su and verb in ('create', 'update'):
+        log_event(user_guid=get_current_user_guid(),
+                  action=f'care_plan.{verb}.admin_bypass', resource_type='CarePlan',
+                  resource_guid=care_plan_guid, data_subject_guid=patient_guid,
+                  ip_address=request.remote_addr,
+                  details={'reason': 'caller_is_su_admin'})
+    return None
 
 
 def _parse_dt(value):
@@ -44,6 +78,7 @@ def _parse_dt(value):
 
 @care_plans_bp.route('/careplans', methods=['POST'])
 @requires_auth
+@requires_role('read_write')
 def create_care_plan():
     """Create a CarePlan FROM a PlanDefinition for a specific patient.
 
@@ -60,6 +95,9 @@ def create_care_plan():
     plandef_guid = bleach.clean(str(body.get('plan_definition_guid') or '')).strip()
     if not patient_guid or not plandef_guid:
         return jsonify({'error': 'patient_guid and plan_definition_guid required'}), 400
+    refused = _gate(patient_guid, 'create')
+    if refused:
+        return refused
 
     # Pull the PlanDefinition snapshot from plan.pdhc. We accept either
     # a 200 with the JSON body or a transient 5xx (in which case the
@@ -101,19 +139,41 @@ def create_care_plan():
 
 @care_plans_bp.route('/careplans/<guid>', methods=['GET'])
 @requires_auth
+@audit_read('care_plan.read', resource_type='CarePlan', guid_arg='guid')
 def get_care_plan(guid):
     cp = CarePlan.query.filter_by(guid=bleach.clean(guid)).first()
     if not cp:
         return jsonify({'error': 'not found'}), 404
+    refused = _gate(cp.patient_guid, 'read', cp.guid)
+    if refused:
+        return refused
     return jsonify(cp.to_dict()), 200
 
 
 @care_plans_bp.route('/careplans', methods=['GET'])
 @requires_auth
+@audit_read('care_plan.list', resource_type='CarePlan')
 def list_care_plans():
-    """List CarePlans, optionally filtered by patient_guid + status."""
+    """List CarePlans for ONE patient (#981).
+
+    `patient_guid` is REQUIRED for every caller but an SU admin: unfiltered,
+    this returned up to 500 care plans across all patients to anyone holding a
+    credential. With a patient, the caller must reach that patient.
+    """
     patient_guid = request.args.get('patient_guid')
     status_filter = request.args.get('status')
+    if patient_guid:
+        refused = _gate(bleach.clean(patient_guid), 'list')
+        if refused:
+            return refused
+    else:
+        blob = get_current_access_blob()
+        if not (blob and blob.get('is_su_admin')):
+            log_event(user_guid=get_current_user_guid(), action='care_plan.list.denied',
+                      resource_type='CarePlan', ip_address=request.remote_addr,
+                      details={'reason': 'patient_guid_required'})
+            return jsonify({'code': 'bad_request',
+                            'message': 'patient_guid is required'}), 400
     limit = min(int(request.args.get('limit', 100)), 500)
     offset = int(request.args.get('offset', 0))
 
@@ -132,12 +192,20 @@ def list_care_plans():
 
 @care_plans_bp.route('/careplans/<guid>', methods=['PUT'])
 @requires_auth
+@requires_role('read_write')
 def update_care_plan(guid):
     """Update mutable fields. Patient + plan_definition references are
-    immutable once created."""
+    immutable once created.
+
+    #981: GATED, and it matters more than the reads — `goals` set the LIMITS
+    the patient dashboard judges values against (MDR class IIa, 2026-11-12).
+    """
     cp = CarePlan.query.filter_by(guid=bleach.clean(guid)).first()
     if not cp:
         return jsonify({'error': 'not found'}), 404
+    refused = _gate(cp.patient_guid, 'update', cp.guid)
+    if refused:
+        return refused
     body = request.get_json(silent=True) or {}
     for field in ('status', 'intent', 'title', 'description'):
         if field in body:
@@ -156,6 +224,7 @@ def update_care_plan(guid):
 
 @care_plans_bp.route('/careplans/<guid>/context', methods=['GET'])
 @requires_auth
+@audit_read('care_plan.context.read', resource_type='CarePlan', guid_arg='guid')
 def care_plan_context(guid):
     """Resolved provenance for a CarePlan.
 
@@ -167,6 +236,9 @@ def care_plan_context(guid):
     cp = CarePlan.query.filter_by(guid=bleach.clean(guid)).first()
     if not cp:
         return jsonify({'error': 'not found'}), 404
+    refused = _gate(cp.patient_guid, 'context', cp.guid)
+    if refused:
+        return refused
 
     snapshot = cp.plan_definition_snapshot or {}
     transactions = []
