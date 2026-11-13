@@ -638,3 +638,7 @@ false for 11 files; a hand survey cannot be the gate here.
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/api/care_plans.py
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/api/service_requests.py
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_care_plans_scope_981.py
+
+## 2026-11-13 — #991: every ServiceRequest guid route gated on the patient's organisation; list fail-open closed
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/api/service_requests.py
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_service_request_scope_991.py

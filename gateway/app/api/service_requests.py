@@ -1,7 +1,10 @@
 """API endpoints for ServiceRequest CRUD and workflow."""
 
+import functools
+
 import bleach
 from flask import Blueprint, jsonify, request
+from app.models.service_request_models import ServiceRequest
 from app.middleware.auth_middleware import requires_auth, requires_role
 from app.services import service_request_service, contract_service, plan_definition_service
 from app.services import patient_service
@@ -14,6 +17,50 @@ from app.services.reform_scope import (
 )
 
 service_requests_bp = Blueprint('service_requests_api', __name__)
+
+
+def sr_patient_gate(verb):
+    """Every route keyed by a ServiceRequest guid reaches its PATIENT only
+    through the caller's organisation (#991) — the rule in
+    app/services/patient_access.py, shared with POST /ServiceRequest and the
+    CarePlan routes (#981).
+
+    Before this, all twelve guid routes — the read, matches, receipts, forms,
+    and the finalize / archive / revoke / match / push WRITES — checked only
+    that the caller was logged in (spärr aside, on the read).
+
+    Innermost decorator, so @audit_read (which audits 2xx only) never records
+    a refused read; the refusal is audited here, with its reason. An unknown
+    guid falls through to the route, which answers its own 404.
+    """
+    def wrap(fn):
+        @functools.wraps(fn)
+        def inner(*args, **kwargs):
+            guid = kwargs.get('guid')
+            sr = (ServiceRequest.query.filter_by(guid=bleach.clean(guid)).first()
+                  if guid else None)
+            if sr is not None:
+                decision = patient_access.evaluate(get_current_access_blob(),
+                                                   sr.patient_guid)
+                if not decision.allowed:
+                    log_event(user_guid=get_current_user_guid(),
+                              action=f'service_request.{verb}.denied',
+                              resource_type='ServiceRequest', resource_guid=sr.guid,
+                              data_subject_guid=sr.patient_guid,
+                              ip_address=request.remote_addr,
+                              details={'reason': decision.reason, **decision.details})
+                    messages = {
+                        'patient_not_found': 'Patient not found',
+                        'ips_lookup_failed': ('Could not verify patient affiliation; '
+                                              'try again shortly.'),
+                        'patient_org_mismatch': ('Patient is not assigned to any clinic '
+                                                 'in your organisations (PDL Ch 4 §§ 1-2).'),
+                    }
+                    return jsonify({'code': decision.code,
+                                    'message': messages[decision.reason]}), decision.status
+            return fn(*args, **kwargs)
+        return inner
+    return wrap
 
 
 @service_requests_bp.route('/ServiceRequest', methods=['POST'])
@@ -189,6 +236,16 @@ def list_all():
     blob = get_current_access_blob()
     is_su = blob.get('is_su_admin', False) if blob else False
     org_guid = (_caller_org_ids(blob) or [None])[0] if blob else None  # M0 #419
+    if not is_su and not org_guid:
+        # #991: the service filters `if not is_su_admin and org_guid`, so a
+        # non-SU caller with NO organisation skipped the filter and was shown
+        # EVERY ServiceRequest. Absence of an affiliation must narrow, never
+        # widen. Refused here, by name, and audited.
+        log_event(user_guid=get_current_user_guid(), action='service_request.list.denied',
+                  resource_type='ServiceRequest', ip_address=request.remote_addr,
+                  details={'reason': 'caller_has_no_organisation'})
+        return jsonify({'code': 'forbidden',
+                        'message': 'Your account has no organisation; nothing to list.'}), 403
 
     data, status = service_request_service.list_service_requests(
         user_guid=get_current_user_guid(),
@@ -206,6 +263,7 @@ def list_all():
 @service_requests_bp.route('/ServiceRequest/<guid>', methods=['GET'])
 @requires_auth
 @audit_read('service_request.read', resource_type='ServiceRequest', guid_arg='guid')
+@sr_patient_gate('read')
 def get_one(guid):
     """Get a single ServiceRequest."""
     data, status = service_request_service.get_service_request(bleach.clean(guid))
@@ -215,6 +273,7 @@ def get_one(guid):
 @service_requests_bp.route('/ServiceRequest/<guid>/snapshot', methods=['PUT'])
 @requires_auth
 @requires_role('read_write')
+@sr_patient_gate('snapshot')
 def update_snapshot(guid):
     """Update the PlanDefinition snapshot (draft only)."""
     payload = request.get_json(silent=True)
@@ -234,6 +293,7 @@ def update_snapshot(guid):
 @service_requests_bp.route('/ServiceRequest/<guid>/finalize', methods=['POST'])
 @requires_auth
 @requires_role('read_write')
+@sr_patient_gate('finalize')
 def finalize(guid):
     """Finalize a draft ServiceRequest (build FHIR, set active)."""
     data, status = service_request_service.finalize_service_request(
@@ -247,6 +307,7 @@ def finalize(guid):
 @service_requests_bp.route('/ServiceRequest/<guid>/archive', methods=['POST'])
 @requires_auth
 @requires_role('read_write')
+@sr_patient_gate('archive')
 def archive(guid):
     """Archive a ServiceRequest."""
     data, status = service_request_service.archive_service_request(
@@ -260,6 +321,7 @@ def archive(guid):
 @service_requests_bp.route('/ServiceRequest/<guid>/revoke', methods=['POST'])
 @requires_auth
 @requires_role('read_write')
+@sr_patient_gate('revoke')
 def revoke(guid):
     """Revoke a ServiceRequest."""
     data, status = service_request_service.revoke_service_request(
@@ -273,6 +335,7 @@ def revoke(guid):
 @service_requests_bp.route('/ServiceRequest/<guid>/matches', methods=['GET'])
 @requires_auth
 @audit_read('service_request.matches.list', resource_type='ServiceRequest', guid_arg='guid')
+@sr_patient_gate('matches')
 def list_matches(guid):
     """List contract matches for a ServiceRequest."""
     from app.services.match_service import list_matches_for_request
@@ -283,6 +346,7 @@ def list_matches(guid):
 @service_requests_bp.route('/ServiceRequest/<guid>/match', methods=['POST'])
 @requires_auth
 @requires_role('read_write')
+@sr_patient_gate('match')
 def find_matches(guid):
     """Find matching contracts for a ServiceRequest."""
     from app.services.match_service import find_and_create_matches
@@ -297,6 +361,7 @@ def find_matches(guid):
 @service_requests_bp.route('/ServiceRequest/<guid>/push', methods=['POST'])
 @requires_auth
 @requires_role('read_write')
+@sr_patient_gate('push')
 def push_all(guid):
     """Push ServiceRequest to all pending matched providers."""
     from app.services.push_service import push_all_matches
@@ -311,6 +376,7 @@ def push_all(guid):
 @service_requests_bp.route('/ServiceRequest/<guid>/push/<match_guid>', methods=['POST'])
 @requires_auth
 @requires_role('read_write')
+@sr_patient_gate('push')
 def push_one(guid, match_guid):
     """Push ServiceRequest to a single matched provider."""
     from app.services.push_service import push_to_provider
@@ -325,6 +391,7 @@ def push_one(guid, match_guid):
 @service_requests_bp.route('/ServiceRequest/<guid>/receipts', methods=['GET'])
 @requires_auth
 @audit_read('service_request.receipts.list', resource_type='ServiceRequest', guid_arg='guid')
+@sr_patient_gate('receipts')
 def list_receipts(guid):
     """List delivery receipts for a ServiceRequest."""
     from app.services.push_service import list_receipts_for_request
@@ -377,6 +444,7 @@ def trigger_auto_archive():
 @service_requests_bp.route('/ServiceRequest/<guid>/forms', methods=['GET'])
 @requires_auth
 @audit_read('service_request.forms.list', resource_type='ServiceRequest', guid_arg='guid')
+@sr_patient_gate('forms')
 def list_forms(guid):
     """List attached forms for a ServiceRequest."""
     data, status = service_request_service.list_forms_for_request(bleach.clean(guid))
@@ -386,6 +454,7 @@ def list_forms(guid):
 @service_requests_bp.route('/ServiceRequest/<guid>/forms', methods=['POST'])
 @requires_auth
 @requires_role('read_write')
+@sr_patient_gate('forms.add')
 def add_form(guid):
     """Attach a form to a draft ServiceRequest."""
     payload = request.get_json(silent=True)
