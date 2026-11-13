@@ -132,7 +132,7 @@
     <tr><td><strong>Intent</strong></td><td>{{ sr.intent }}</td></tr>
     <tr><td><strong>Priority</strong></td><td>{{ sr.priority }}</td></tr>
     <tr><td><strong>Requester</strong></td><td>{{ sr.requester_user_name or '' }}{% if sr.requester_user_name %} {% endif %}<span style="font-size:0.75rem; color:var(--text-muted);">{{ sr.requester_user_guid }}</span></td></tr>
-    <tr><td><strong>Requester Organisation</strong></td><td>{% if sr.requester_org_guid %}{{ sr.requester_org_name or '' }}{% if sr.requester_org_name %} {% endif %}<span style="font-size:0.75rem; color:var(--text-muted);">{{ sr.requester_org_guid }}</span>{% else %}—{% endif %}</td></tr>
+    <tr><td><strong>Requesting care unit</strong></td><td>{% if sr.requester_org_guid %}{{ sr.requester_org_name or '' }}{% if sr.requester_org_name %} {% endif %}<span style="font-size:0.75rem; color:var(--text-muted);">{{ sr.requester_org_guid }}</span>{% else %}—{% endif %}</td></tr>
     <tr><td><strong>Contract</strong></td><td>{% if sr.contract_guid %}{{ contract_name or '' }}{% if contract_name %} {% endif %}<span style="font-size:0.75rem; color:var(--text-muted);">{{ sr.contract_guid }}</span>{% else %}—{% endif %}</td></tr>
     <tr><td><strong>Notes</strong></td><td>{{ sr.notes or '—' }}</td></tr>
     <tr><td><strong>Period</strong></td><td>{{ sr.period_start or '—' }} to {{ sr.period_end or '—' }}</td></tr>
@@ -284,7 +284,7 @@
           {% endfor %}
           {% if sr.requester_org_guid %}
           <tr>
-            <td><strong>Req. Organisation</strong></td>
+            <td><strong>Req. care unit</strong></td>
             <td>{{ sr.requester_org_name or '' }}</td>
             <td style="font-size:0.75rem;">{{ sr.requester_org_guid }}</td>
             <td><a href="https://sso.pdhc.se/admin/organisations/{{ sr.requester_org_guid }}" target="_blank" class="btn btn-sm btn-secondary" style="padding:0.1rem 0.4rem; font-size:0.75rem;">SSO</a></td>

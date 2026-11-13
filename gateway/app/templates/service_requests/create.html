@@ -17,23 +17,29 @@
   One choice now does both jobs. Changing it reloads the page via GET so the
   patient list comes back from ips for that organisation, rather than being
   filtered in the browser from a list the server already decided.
+
+  2026-11-13: the user-facing word is CARE UNIT (vårdenhet), not
+  organisation. Under the main rule a professional is employed by a
+  vårdgivare and affiliated to units, and the unit is what scopes patients
+  and is recorded as requester. The variable names keep `org` — that is the
+  platform's identifier space, not a label.
 #}
 <form method="GET" action="{{ url_for('service_requests_web.create_view') }}"
       style="max-width:40rem;" id="org-scope-form">
   <div class="form-group">
-    <label for="org">Organisation{% if is_su_admin %} (all — you are SU admin){% endif %}</label>
+    <label for="org">Care unit{% if is_su_admin %} (all — you are SU admin){% endif %}</label>
     {% if caller_orgs and caller_orgs|length > 1 %}
       <select name="org" id="org" class="form-control"
               onchange="document.getElementById('org-scope-form').submit();">
-        <option value="">-- Select organisation --</option>
+        <option value="">-- Select care unit --</option>
         {% for o in caller_orgs %}
           <option value="{{ o.guid }}" {% if o.guid == selected_org %}selected{% endif %}>{{ o.name }}</option>
         {% endfor %}
       </select>
       <p style="font-size:0.85em; color:var(--text-muted); margin-top:0.4rem;">
-        You are affiliated with several organisations. The one you pick both
+        You are affiliated with several care units. The one you pick both
         scopes the patients below and is recorded as the requesting
-        organisation (Lag 2022:913 chain-of-custody).
+        care unit (Lag 2022:913 chain-of-custody).
       </p>
     {% elif caller_orgs and caller_orgs|length == 1 %}
       <p style="font-size:0.92em; color:var(--text-muted); margin:0;">
@@ -41,7 +47,7 @@
       </p>
     {% else %}
       <p style="font-size:0.9em; color:var(--danger, #b00); margin:0;">
-        No organisation affiliation found, so no patients can be offered.
+        No care-unit affiliation found, so no patients can be offered.
       </p>
     {% endif %}
   </div>
@@ -64,11 +70,11 @@
         <strong>The patient list could not be loaded from ips.</strong><br>
         <span style="font-size:0.88em; color:var(--text-muted);">{{ patient_list_error }}</span><br>
         <span style="font-size:0.88em;">This is <em>not</em> "no patients" — do
-        not conclude the organisation has none. Retry, or tell an operator.</span>
+        not conclude the care unit has none. Retry, or tell an operator.</span>
       </p>
     {% elif not selected_org %}
       <p style="font-size:0.9em; color:var(--text-muted); margin:0;">
-        Pick an organisation above to see its patients.
+        Pick a care unit above to see its patients.
       </p>
     {% else %}
       <select name="patient_guid" id="patient_guid" class="form-control" required>
@@ -83,10 +89,10 @@
       </select>
       <p style="font-size:0.85em; color:var(--text-muted); margin-top:0.4rem;">
         {{ patients|length }} patient{{ '' if patients|length == 1 else 's' }}
-        assigned to this organisation in ips.
+        assigned to this care unit in ips.
         {% if patients|length == 0 %}
           ips answered, and the answer is that none are assigned — a patient
-          with no assignment is invisible to every organisation-scoped reader,
+          with no assignment is invisible to every unit-scoped reader,
           which is a data problem to fix in ips rather than here.
         {% endif %}
       </p>

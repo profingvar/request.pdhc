@@ -228,9 +228,21 @@ def get_service_request(guid):
     return sr.to_dict(), 200
 
 
-def list_service_requests(user_guid=None, org_guid=None, is_su_admin=False,
+def list_service_requests(user_guid=None, org_guids=None, is_su_admin=False,
                           status_filter=None, include_archived=False, page=1, per_page=50):
-    """List ServiceRequests, filtered by organisation for non-SU users.
+    """List ServiceRequests, filtered by CARE UNIT for non-SU users.
+
+    `org_guids` is EVERY unit the caller is affiliated to (caller_org_ids),
+    not the first one: the main rule (operator 2026-11-13) affiliates a
+    professional to several units, and taking `[0]` hid the requests of all
+    but one of them.
+
+    A non-SU caller with NO unit gets an EMPTY page, here, in the service.
+    It used to be `if not is_su_admin and org_guid:`, which SKIPPED the filter
+    for a caller without one and showed every ServiceRequest. #991 closed
+    that on the API route only; the two web lists still widened. Absence of
+    an affiliation must narrow, never widen — so the rule lives where no
+    caller can forget it.
 
     Spärr (PDL Ch 4 § 4 / ticket #228): after org-scoping, drop SRs
     whose patient has blocked the SR's requester_org. The IPS lookup
@@ -239,8 +251,11 @@ def list_service_requests(user_guid=None, org_guid=None, is_su_admin=False,
     """
     query = ServiceRequest.query
 
-    if not is_su_admin and org_guid:
-        query = query.filter_by(requester_org_guid=org_guid)
+    if not is_su_admin:
+        units = sorted({str(g) for g in (org_guids or ()) if g})
+        if not units:
+            return {'items': [], 'total': 0, 'page': page, 'per_page': per_page}, 200
+        query = query.filter(ServiceRequest.requester_org_guid.in_(units))
 
     if status_filter:
         query = query.filter_by(status=status_filter)

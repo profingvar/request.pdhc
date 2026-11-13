@@ -642,3 +642,12 @@ false for 11 files; a hand survey cannot be the gate here.
 ## 2026-11-13 — #991: every ServiceRequest guid route gated on the patient's organisation; list fail-open closed
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/api/service_requests.py
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_service_request_scope_991.py
+
+## 2026-11-13 — SR lists show EVERY care unit; web lists no longer fail open; "organisation" → "care unit" in the form
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/service_request_service.py — list_service_requests(org_guids=[...]); non-SU with no unit → empty page in the service
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/routes/service_requests.py — web list + archive pass every unit; flash texts say care unit
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/api/service_requests.py — API list passes every unit (#991 403 kept)
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/templates/service_requests/create.html — labels: care unit
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/templates/service_requests/view.html — "Requesting care unit"
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_sr_list_every_unit.py (NEW)
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_create_patient_selector.py — pinned label updated

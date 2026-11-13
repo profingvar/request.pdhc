@@ -235,8 +235,9 @@ def list_all():
     """List ServiceRequests (org-filtered for non-SU)."""
     blob = get_current_access_blob()
     is_su = blob.get('is_su_admin', False) if blob else False
-    org_guid = (_caller_org_ids(blob) or [None])[0] if blob else None  # M0 #419
-    if not is_su and not org_guid:
+    # Every unit, not the first (main rule 2026-11-13).
+    org_guids = _caller_org_ids(blob) if blob else []  # M0 #419
+    if not is_su and not org_guids:
         # #991: the service filters `if not is_su_admin and org_guid`, so a
         # non-SU caller with NO organisation skipped the filter and was shown
         # EVERY ServiceRequest. Absence of an affiliation must narrow, never
@@ -249,7 +250,7 @@ def list_all():
 
     data, status = service_request_service.list_service_requests(
         user_guid=get_current_user_guid(),
-        org_guid=org_guid,
+        org_guids=org_guids,
         is_su_admin=is_su,
         status_filter=request.args.get('status'),
         page=int(request.args.get('page', 1)),

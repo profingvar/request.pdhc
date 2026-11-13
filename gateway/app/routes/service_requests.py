@@ -102,14 +102,15 @@ def list_view():
     """List ServiceRequests (org-filtered)."""
     blob = get_current_access_blob()
     is_su = blob.get('is_su_admin', False) if blob else False
-    org_guid = (_caller_org_ids(blob) or [None])[0] if blob else None  # M0 #419
+    # Every unit, not the first (main rule 2026-11-13).
+    org_guids = _caller_org_ids(blob) if blob else []  # M0 #419
 
     status_filter = request.args.get('status')
     page = int(request.args.get('page', 1))
 
     data, _ = service_request_service.list_service_requests(
         user_guid=get_current_user_guid(),
-        org_guid=org_guid,
+        org_guids=org_guids,
         is_su_admin=is_su,
         status_filter=status_filter,
         page=page,
@@ -128,7 +129,8 @@ def archived_view():
     """List archived and revoked ServiceRequests."""
     blob = get_current_access_blob()
     is_su = blob.get('is_su_admin', False) if blob else False
-    org_guid = (_caller_org_ids(blob) or [None])[0] if blob else None  # M0 #419
+    # Every unit, not the first (main rule 2026-11-13).
+    org_guids = _caller_org_ids(blob) if blob else []  # M0 #419
 
     status_filter = request.args.get('status', '')
     page = int(request.args.get('page', 1))
@@ -141,7 +143,7 @@ def archived_view():
 
     data, _ = service_request_service.list_service_requests(
         user_guid=get_current_user_guid(),
-        org_guid=org_guid,
+        org_guids=org_guids,
         is_su_admin=is_su,
         status_filter=sf,
         include_archived=True,
@@ -197,11 +199,11 @@ def create_view():
             # explicitly; the chosen org must be one of theirs.
             if requesting_org_guid and not is_su \
                     and requesting_org_guid not in caller_org_ids_list:
-                flash('Selected organisation is not one of yours.', 'danger')
+                flash('Selected care unit is not one of yours.', 'danger')
                 return redirect(url_for('service_requests_web.create_view'))
             if not requesting_org_guid and not is_su:
                 if len(caller_org_ids_list) > 1:
-                    flash('Pick the requesting organisation '
+                    flash('Pick the requesting care unit '
                           '(Lag 2022:913 chain-of-custody).', 'danger')
                     return redirect(url_for('service_requests_web.create_view'))
                 if caller_org_ids_list:
@@ -275,7 +277,7 @@ def create_view():
     # with. Mirrors the POST gate below rather than trusting the query string.
     allowed_orgs = {c['org_guid'] for c in org_clinics}
     if selected_org and not is_su and selected_org not in allowed_orgs:
-        flash('Selected organisation is not one of yours.', 'danger')
+        flash('Selected care unit is not one of yours.', 'danger')
         selected_org = None
 
     # One affiliation -> no choice to make, so make it for them.

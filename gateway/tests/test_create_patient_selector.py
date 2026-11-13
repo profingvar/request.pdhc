@@ -293,7 +293,7 @@ class TestThePageItself:
             self, app, client):
         r = self._get(app, client, orgs=[ORG_A, ORG_B])
         body = r.get_data(as_text=True)
-        assert "Pick an organisation above to see its patients." in body
+        assert "Pick a care unit above to see its patients." in body
         assert "Alfason" not in body
 
     def test_choosing_an_org_lists_its_patients(self, app, client):
