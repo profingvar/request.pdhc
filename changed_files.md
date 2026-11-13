@@ -651,3 +651,8 @@ false for 11 files; a hand survey cannot be the gate here.
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/templates/service_requests/view.html — "Requesting care unit"
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_sr_list_every_unit.py (NEW)
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_create_patient_selector.py — pinned label updated
+
+## 2026-11-13 — #996: web gets the API's gates (care unit per SR guid, professional/SU only, audited lists)
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/routes/service_requests.py — web_sr_patient_gate on all 12 guid routes; _audit_web_list on the list + archive
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/middleware/auth_middleware.py — web pages require professional or SU (web_user_allowed); refusal audited
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_web_sr_gate_996.py (NEW)

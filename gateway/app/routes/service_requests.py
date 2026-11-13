@@ -14,12 +14,68 @@ from app.services.match_service import (
 )
 from app.services.push_service import push_all_matches, list_receipts_for_request
 from app.services.auth_service import get_current_user_guid, get_current_access_blob
+from app.services import patient_access
+from app.services.audit_service import log_event
+from app.models.service_request_models import ServiceRequest
+import functools
 from app.services.reform_scope import (
     caller_org_ids as _caller_org_ids,
     caller_org_names as _caller_org_names,
 )
 
 service_requests_web_bp = Blueprint('service_requests_web', __name__)
+
+
+def _audit_web_list(action, is_su, org_guids, data):
+    """Rule 24 (#996): the two web lists wrote no audit row, so who opened
+    them was answerable only from the proxy log, which names no user."""
+    log_event(user_guid=get_current_user_guid(), action=action,
+              resource_type='ServiceRequest', ip_address=request.remote_addr,
+              details={'is_su_admin': bool(is_su), 'care_unit_count': len(org_guids or []),
+                       'returned': len(data.get('items', [])), 'total': data.get('total', 0)})
+
+
+def web_sr_patient_gate(verb):
+    """The web twin of the API's sr_patient_gate (#991, #996).
+
+    Every web route keyed by a ServiceRequest guid reaches its PATIENT only
+    through the caller's care units — the same rule as the API and the
+    CarePlan routes (app/services/patient_access.py, #981). Before #996 the
+    web detail view checked only that the caller was logged in, and the
+    finalize / archive / revoke / dispatch / push writes only that the
+    caller had `read_write` — any unit's request was reachable by guid.
+
+    Innermost decorator. A refusal is audited with its reason and answered
+    with a flash and a redirect to the list; an unknown guid falls through
+    to the route's own "not found".
+    """
+    messages = {
+        'patient_not_found': 'ServiceRequest not found.',
+        'ips_lookup_failed': 'Could not verify the patient\'s care unit; try again shortly.',
+        'patient_org_mismatch': ('This ServiceRequest\'s patient is not assigned to any of '
+                                 'your care units (PDL Ch 4 §§ 1-2).'),
+    }
+
+    def wrap(fn):
+        @functools.wraps(fn)
+        def inner(*args, **kwargs):
+            guid = kwargs.get('guid')
+            sr = ServiceRequest.query.filter_by(guid=guid).first() if guid else None
+            if sr is not None:
+                decision = patient_access.evaluate(get_current_access_blob(), sr.patient_guid)
+                if not decision.allowed:
+                    log_event(user_guid=get_current_user_guid(),
+                              action=f'service_request.web.{verb}.denied',
+                              resource_type='ServiceRequest', resource_guid=sr.guid,
+                              data_subject_guid=sr.patient_guid,
+                              ip_address=request.remote_addr,
+                              details={'reason': decision.reason, **decision.details})
+                    flash(messages.get(decision.reason, 'Access denied.'), 'danger')
+                    return redirect(url_for('service_requests_web.list_view'))
+            return fn(*args, **kwargs)
+        return inner
+    return wrap
+
 
 
 _SSO_ORG_CACHE = {}
@@ -115,6 +171,7 @@ def list_view():
         status_filter=status_filter,
         page=page,
     )
+    _audit_web_list('service_request.web.list', is_su, org_guids, data)
     return render_template('service_requests/list.html',
                            items=data.get('items', []),
                            total=data.get('total', 0),
@@ -149,6 +206,7 @@ def archived_view():
         include_archived=True,
         page=page,
     )
+    _audit_web_list('service_request.web.archived', is_su, org_guids, data)
 
     # If no specific filter, manually filter to only archived+revoked
     items = data.get('items', [])
@@ -355,6 +413,7 @@ def create_view():
 
 @service_requests_web_bp.route('/service-requests/<guid>')
 @requires_auth
+@web_sr_patient_gate('read')
 def view_detail(guid):
     """View a single ServiceRequest with its matches."""
     data, status = service_request_service.get_service_request(guid)
@@ -425,6 +484,7 @@ def _timeline_lines_for_js(tl):
 
 @service_requests_web_bp.route('/service-requests/<guid>/timeline')
 @requires_auth
+@web_sr_patient_gate('timeline')
 def timeline_view(guid):
     """Metro-map schedule timeline for a ServiceRequest's plan.
 
@@ -493,6 +553,7 @@ def plan_timeline_preview(plandef_guid):
 @service_requests_web_bp.route('/service-requests/<guid>/edit-plan', methods=['GET', 'POST'])
 @requires_auth
 @requires_role('read_write')
+@web_sr_patient_gate('edit_plan')
 def edit_plan(guid):
     """Edit the PlanDefinition snapshot (draft only)."""
     import json
@@ -553,6 +614,7 @@ def edit_plan(guid):
 @service_requests_web_bp.route('/service-requests/<guid>/finalize', methods=['POST'])
 @requires_auth
 @requires_role('read_write')
+@web_sr_patient_gate('finalize')
 def finalize_view(guid):
     """Finalize a draft ServiceRequest."""
     data, status = service_request_service.finalize_service_request(
@@ -570,6 +632,7 @@ def finalize_view(guid):
 @service_requests_web_bp.route('/service-requests/<guid>/archive', methods=['POST'])
 @requires_auth
 @requires_role('read_write')
+@web_sr_patient_gate('archive')
 def archive_view(guid):
     """Archive a ServiceRequest."""
     data, status = service_request_service.archive_service_request(
@@ -590,6 +653,7 @@ def archive_view(guid):
 @service_requests_web_bp.route('/service-requests/<guid>/revoke', methods=['POST'])
 @requires_auth
 @requires_role('read_write')
+@web_sr_patient_gate('revoke')
 def revoke_view(guid):
     """Revoke a ServiceRequest."""
     data, status = service_request_service.revoke_service_request(
@@ -612,6 +676,7 @@ def revoke_view(guid):
 @service_requests_web_bp.route('/service-requests/<guid>/find-matches', methods=['POST'])
 @requires_auth
 @requires_role('read_write')
+@web_sr_patient_gate('find_matches')
 def find_matches_view(guid):
     """Find matching contracts for an active ServiceRequest (legacy)."""
     data, status = find_and_create_matches(
@@ -630,6 +695,7 @@ def find_matches_view(guid):
 @service_requests_web_bp.route('/service-requests/<guid>/dispatch', methods=['POST'])
 @requires_auth
 @requires_role('read_write')
+@web_sr_patient_gate('dispatch')
 def dispatch_view(guid):
     """Dispatch ServiceRequest to a chosen provider."""
     contract_guid = request.form.get('contract_guid', '')
@@ -658,6 +724,7 @@ def dispatch_view(guid):
 @service_requests_web_bp.route('/service-requests/<guid>/add-form', methods=['POST'])
 @requires_auth
 @requires_role('read_write')
+@web_sr_patient_gate('forms.add')
 def add_form_view(guid):
     """Attach a form to a draft ServiceRequest."""
     form_guid = request.form.get('form_guid', '')
@@ -681,6 +748,7 @@ def add_form_view(guid):
 @service_requests_web_bp.route('/service-requests/<guid>/remove-form/<form_sr_guid>', methods=['POST'])
 @requires_auth
 @requires_role('read_write')
+@web_sr_patient_gate('forms.remove')
 def remove_form_view(guid, form_sr_guid):
     """Remove an attached form from a draft ServiceRequest."""
     data, status = service_request_service.remove_form_from_request(
@@ -698,6 +766,7 @@ def remove_form_view(guid, form_sr_guid):
 
 @service_requests_web_bp.route('/service-requests/<guid>/form/<form_sr_guid>')
 @requires_auth
+@web_sr_patient_gate('forms.read')
 def view_form_detail(guid, form_sr_guid):
     """View a single attached form's Questionnaire + render-ready JSON."""
     import json as json_mod
@@ -722,6 +791,7 @@ def view_form_detail(guid, form_sr_guid):
 @service_requests_web_bp.route('/service-requests/<guid>/push-all', methods=['POST'])
 @requires_auth
 @requires_role('read_write')
+@web_sr_patient_gate('push')
 def push_all_view(guid):
     """Push ServiceRequest to all pending matched providers."""
     data, status = push_all_matches(

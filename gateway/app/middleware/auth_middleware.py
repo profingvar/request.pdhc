@@ -109,8 +109,28 @@ def requires_auth(f):
         if mcp is not None:
             return mcp
 
+        # #996: request's WEB pages are for professionals and SU admins.
+        # Before this, any SSO account that completed the login — a patient
+        # included — reached every web page; only the care-unit filters
+        # stood between it and the data. Same shape as ips's
+        # admin_access_policy (#902). The API keeps its own per-route gates.
+        if not request.path.startswith('/api/') and not web_user_allowed(blob):
+            from app.services.audit_service import log_event
+            log_event(user_guid=blob.get('user_guid'), action='web.access.denied',
+                      ip_address=request.remote_addr,
+                      details={'reason': 'not_professional_or_su',
+                               'user_type': blob.get('user_type'), 'path': request.path})
+            abort(403)
+
         return f(*args, **kwargs)
     return decorated
+
+
+def web_user_allowed(blob):
+    """Professional or SU admin (#996). Pure, so it can be tested alone."""
+    if not blob:
+        return False
+    return bool(blob.get('is_su_admin')) or blob.get('user_type') == 'professional'
 
 
 def requires_provider_token(scope='read'):
