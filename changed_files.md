@@ -656,3 +656,9 @@ false for 11 files; a hand survey cannot be the gate here.
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/routes/service_requests.py — web_sr_patient_gate on all 12 guid routes; _audit_web_list on the list + archive
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/middleware/auth_middleware.py — web pages require professional or SU (web_user_allowed); refusal audited
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_web_sr_gate_996.py (NEW)
+
+## 2026-11-14 — organization_ids fallback removed (care unit = affiliation only)
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/reform_scope.py — caller_org_ids / caller_org_names read affiliations only
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/routes/service_requests.py — create form: no care unit, no request (same rule)
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_reform_scope.py — the two fallback-pinning tests inverted
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_service_request_scope_991.py, test_care_plans_scope_981.py, test_service_request_create_authz.py — blobs carry affiliations; + route test: organization_ids alone reach nothing

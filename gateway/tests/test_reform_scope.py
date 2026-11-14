@@ -27,17 +27,19 @@ def test_ids_precedence_over_legacy():
     assert caller_org_ids(blob) == ["u1"]
 
 
-def test_legacy_parallel_array_fallback():
+def test_legacy_organization_ids_ALONE_grant_nothing():
+    """2026-11-14: the fallback is gone. These two tests used to PIN it
+    (organization_ids -> scope). A membership is not a care-unit assignment,
+    so a blob with memberships and no affiliation has no scope at all."""
     blob = {"organization_ids": ["o1", "o2"],
             "organization_names": ["Org One", "Org Two"]}
-    assert caller_org_ids(blob) == ["o1", "o2"]
-    assert caller_org_names(blob) == {"o1": "Org One", "o2": "Org Two"}
+    assert caller_org_ids(blob) == []
+    assert caller_org_names(blob) == {}
 
 
-def test_legacy_names_gap_yields_none():
-    # The GAP: organization_names shorter/empty -> None, never an IndexError.
-    blob = {"organization_ids": ["o1", "o2"], "organization_names": ["Org One"]}
-    assert caller_org_names(blob) == {"o1": "Org One", "o2": None}
+def test_an_EMPTY_affiliation_list_does_not_fall_back():
+    blob = {"affiliations": [], "organization_ids": ["o1"]}
+    assert caller_org_ids(blob) == []
 
 
 def test_empty_and_none():

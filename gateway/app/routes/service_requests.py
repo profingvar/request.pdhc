@@ -227,13 +227,10 @@ def archived_view():
 def create_view():
     """Create a new ServiceRequest — pick patient + PlanDefinition."""
     blob = get_current_access_blob()
-    # M0 #409: organisation_warning is being retired (S9's activation gate
-    # replaced it). Compute the same fact from the reform fields when the
-    # legacy flag is absent: no affiliation and no legacy org = warn.
-    no_org = (blob.get('organisation_warning')
-              if 'organisation_warning' in (blob or {})
-              else not ((blob or {}).get('affiliations')
-                        or (blob or {}).get('organization_ids')))
+    # No care unit, no request: the same rule caller_org_ids applies. The
+    # legacy organisation_warning / organization_ids are no longer read; they
+    # described MEMBERSHIPS, which grant nothing (2026-11-14).
+    no_org = not _caller_org_ids(blob)
     if blob and no_org and not blob.get('is_su_admin'):
         flash('You must belong to an organisation before creating ServiceRequests. '
               'Contact your administrator.', 'danger')

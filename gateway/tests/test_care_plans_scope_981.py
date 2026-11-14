@@ -20,9 +20,12 @@ CLINIC_A = "clinic-a-ips"          # ips primary key: never an authorisation val
 
 
 def _blob(*, su=False, orgs=()):
+    # The caller's care units are AFFILIATIONS. This helper used to set only
+    # the legacy organization_ids, so every test here ran through the
+    # fallback that was removed 2026-11-14; the scope is the same units.
     return {"user_guid": "u-981", "email": "t@example.com", "user_type": "professional",
-            "is_su_admin": su, "organization_ids": list(orgs), "display_name": "T",
-            "effective_phases": ["active"]}
+            "is_su_admin": su, "affiliations": [{"care_unit_guid": o} for o in orgs],
+            "display_name": "T", "effective_phases": ["active"]}
 
 
 @pytest.fixture(autouse=True)

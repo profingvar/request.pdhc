@@ -51,17 +51,17 @@ CLINIC_B = "clinic-b-guid-ips"
 def _blob(*, is_su=False, org_ids=None):
     """Build a synthetic SSO access blob.
 
-    `organization_ids` holds ORGANISATION guids. The gate prefers
-    `affiliations[].care_unit_guid` and falls back to this, so these tests
-    exercise the fallback path.
+    `org_ids` are the caller's CARE UNITS (organisation guids), carried as
+    affiliations. These tests used to exercise the organization_ids
+    fallback, removed 2026-11-14; the scope they test is unchanged.
     """
     return {
         "user_guid": USER_GUID,
         "email": "test@example.com",
         "user_type": "professional",
         "is_su_admin": is_su,
-        "organization_ids": list(org_ids or []),
-        "organization_names": ["Test Clinic"],
+        "affiliations": [{"care_unit_guid": o, "care_unit_name": "Test Clinic"}
+                         for o in (org_ids or [])],
         "display_name": "Test User",
         "effective_phases": ["active"],
     }

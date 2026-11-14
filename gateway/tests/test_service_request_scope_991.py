@@ -18,9 +18,12 @@ CLINIC_A = "clinic-a-ips"
 
 
 def _blob(*, su=False, orgs=()):
+    # The caller's care units are AFFILIATIONS. This helper used to set only
+    # the legacy organization_ids, so every test here ran through the
+    # fallback that was removed 2026-11-14; the scope is the same units.
     return {"user_guid": "u-991", "email": "t@example.com", "user_type": "professional",
-            "is_su_admin": su, "organization_ids": list(orgs), "display_name": "T",
-            "effective_phases": ["active"]}
+            "is_su_admin": su, "affiliations": [{"care_unit_guid": o} for o in orgs],
+            "display_name": "T", "effective_phases": ["active"]}
 
 
 @pytest.fixture(autouse=True)
@@ -111,3 +114,14 @@ def test_the_list_still_works_for_an_organisation(client, sr):
     r = _call(client, "get", "/api/v1/ServiceRequest", _blob(orgs=[ORG_A]))
     assert r.status_code == 200
     assert any(i["guid"] == sr for i in r.get_json()["items"])
+
+
+def test_legacy_organization_ids_ALONE_reach_nothing(client, sr):
+    """2026-11-14: the organization_ids fallback is removed. A blob with an
+    old MEMBERSHIP of the patient's organisation but no affiliation used to
+    read this ServiceRequest and list it; now it gets neither."""
+    legacy = {"user_guid": "u-991", "email": "t@example.com", "user_type": "professional",
+              "is_su_admin": False, "organization_ids": [ORG_A], "display_name": "T",
+              "effective_phases": ["active"]}
+    assert _call(client, "get", f"/api/v1/ServiceRequest/{sr}", legacy).status_code == 403
+    assert _call(client, "get", "/api/v1/ServiceRequest", legacy).status_code == 403
