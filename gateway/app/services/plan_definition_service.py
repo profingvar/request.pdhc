@@ -6,7 +6,10 @@ from app.services.session_headers import outbound_session_headers
 
 def _headers():
     """Build headers for upstream Plan requests."""
-    return {'Accept': 'application/json', **outbound_session_headers()}
+    # #931: plan_read_headers is the CREDENTIAL; outbound_session_headers is
+    # session correlation (#408) only and never was one.
+    from app.services.plan_auth import plan_read_headers
+    return {'Accept': 'application/json', **outbound_session_headers(), **plan_read_headers()}
 
 
 def _plan_url(path=''):

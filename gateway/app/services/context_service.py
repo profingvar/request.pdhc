@@ -46,7 +46,8 @@ def _refresh_plan_maps():
 
     plan.pdhc is the authority on a concept's response_type + unit; the SR
     snapshot carries neither. concept -> response_type_guid/unit_guid -> name.
-    Terminology endpoints are public-read. Cached ``_PLAN_TTL`` s; on any
+    Read with request's plan service key (#931); these endpoints were
+    public-read only because no consumer could authenticate. Cached ``_PLAN_TTL`` s; on any
     failure keeps the last good maps (stale-if-error) so a plan.pdhc blip
     doesn't regress every concept to 'text'/no-unit.
     """
@@ -57,7 +58,8 @@ def _refresh_plan_maps():
     if not base:
         return
     try:
-        h = {'Accept': 'application/json'}
+        from app.services.plan_auth import plan_read_headers
+        h = {'Accept': 'application/json', **plan_read_headers()}  # #931
         rt = requests.get(f'{base}/api/v1/lookup/response-types', headers=h, timeout=6)
         un = requests.get(f'{base}/api/v1/lookup/units', headers=h, timeout=6)
         rt.raise_for_status()

@@ -1604,3 +1604,9 @@ accumulate in one SQLite file. Those three tests count ServiceRequests globally
 (`data["items"]`, `data["total"]`) and therefore see rows other modules created
 — "assert 8 == 3". Filed separately; not fixed here, because adding per-test
 truncation could perturb the 338 that pass.
+
+## #931 — request reads plan with a key (2026-11-16)
+context_service, plan_definition_service and form_service send request's read_only
+plan key. dispatch_service does NOT: plan checks a service key before the
+operator's bearer, so a read_only key would 403 the operator's write.
+pytest: 436 passed.

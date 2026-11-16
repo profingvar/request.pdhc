@@ -72,6 +72,10 @@ class Config:
     IPS_API_KEY = os.environ.get('IPS_API_KEY', '')
     PLAN_BASE_URL = os.environ.get('PLAN_BASE_URL', 'https://plan.pdhc.se')
     PLAN_API_KEY = os.environ.get('PLAN_API_KEY', '')
+    # #931: read_only service key plan.pdhc issues to this service. Unset =
+    # reads go out unauthenticated, exactly as before #931.
+    PLAN_SERVICE_KEY = os.environ.get('PLAN_SERVICE_KEY', '')
+    PLAN_SOURCE_SERVICE = os.environ.get('PLAN_SOURCE_SERVICE', 'request.pdhc')
     SSO_BASE_URL = os.environ.get('SSO_BASE_URL', 'https://sso.pdhc.se')
     SSO_INTERNAL_URL = os.environ.get('SSO_INTERNAL_URL', os.environ.get('SSO_BASE_URL', 'https://sso.pdhc.se'))
     SSO_CLIENT_ID = os.environ.get('SSO_CLIENT_ID', '')

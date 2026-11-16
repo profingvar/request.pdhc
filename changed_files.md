@@ -662,3 +662,9 @@ false for 11 files; a hand survey cannot be the gate here.
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/routes/service_requests.py — create form: no care unit, no request (same rule)
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_reform_scope.py — the two fallback-pinning tests inverted
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_service_request_scope_991.py, test_care_plans_scope_981.py, test_service_request_create_authz.py — blobs carry affiliations; + route test: organization_ids alone reach nothing
+
+## #931 — read plan.pdhc with request's own service key (2026-11-16)
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/plan_auth.py (NEW) — plan_read_headers(): X-Source-Service + X-Service-Key when PLAN_SERVICE_KEY is set
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/config.py — PLAN_SERVICE_KEY, PLAN_SOURCE_SERVICE
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/context_service.py, plan_definition_service.py, form_service.py — every plan READ sends it; dispatch (operator-bearer write) deliberately does not
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/.env.example; /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_plan_read_key_931.py (NEW)

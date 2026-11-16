@@ -12,6 +12,10 @@ def _headers():
     if key:
         h['X-API-Key'] = key
     h.update(outbound_session_headers())
+    # #931: plan's form reads also accept requires_role('read_only'), which a
+    # read_only service key satisfies when PLAN_API_KEY is unset or rotated.
+    from app.services.plan_auth import plan_read_headers
+    h.update(plan_read_headers())
     return h
 
 
