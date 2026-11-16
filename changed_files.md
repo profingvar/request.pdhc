@@ -668,3 +668,9 @@ false for 11 files; a hand survey cannot be the gate here.
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/config.py — PLAN_SERVICE_KEY, PLAN_SOURCE_SERVICE
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/context_service.py, plan_definition_service.py, form_service.py — every plan READ sends it; dispatch (operator-bearer write) deliberately does not
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/.env.example; /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_plan_read_key_931.py (NEW)
+
+## #987 — action limits keep their provenance (2026-11-16)
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/action_limits.py (NEW) — recommended (plan) vs action (requester) limits; server-owned provenance; validation; change lists
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/service_request_service.py — snapshot stamped at create; draft edits merged, validated, audited with details
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/api/care_plans.py — goals stamped at create; PUT merged, validated, AUDITED (was unaudited)
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_action_limits_987.py (NEW), /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_care_plans.py (requester goals marked)

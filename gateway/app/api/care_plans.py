@@ -29,6 +29,7 @@ from app.services import patient_access
 from app.services.audit_service import audit_read, log_event
 from app.services import context_service
 from app.services import plan_definition_service
+from app.services import action_limits
 
 care_plans_bp = Blueprint('care_plans_api', __name__)
 
@@ -118,6 +119,11 @@ def create_care_plan():
     if snapshot is not None:
         snapshot = context_service.enrich_snapshot_concepts(snapshot)
 
+    try:
+        initial_goals = _initial_goals(body.get('goals'), plandef_goals)
+    except action_limits.InvalidActionLimit as e:
+        return jsonify({'code': 'invalid_action_limit', 'message': str(e)}), 400
+
     cp = CarePlan(
         patient_guid=patient_guid,
         plan_definition_guid=plandef_guid,
@@ -128,7 +134,7 @@ def create_care_plan():
         period_start=_parse_dt(body.get('period_start')),
         period_end=_parse_dt(body.get('period_end')),
         plan_definition_snapshot=snapshot,
-        goals=body.get('goals') or plandef_goals,
+        goals=initial_goals,
         care_team_user_guids=body.get('care_team_user_guids') or [],
         created_by_user_guid=get_current_user_guid(),
     )
@@ -214,12 +220,31 @@ def update_care_plan(guid):
         cp.period_start = _parse_dt(body['period_start'])
     if 'period_end' in body:
         cp.period_end = _parse_dt(body['period_end'])
+    goal_changes = None
     if 'goals' in body:
-        cp.goals = body['goals']
+        try:
+            cp.goals, goal_changes = action_limits.merge_goals(cp.goals, body['goals'])
+        except action_limits.InvalidActionLimit as e:
+            return jsonify({'code': 'invalid_action_limit', 'message': str(e)}), 400
     if 'care_team_user_guids' in body:
         cp.care_team_user_guids = body['care_team_user_guids']
     db.session.commit()
+    if goal_changes is not None:
+        # The goals ARE the action limits the dashboard judges against
+        # (MDR IIa): every change is audited with before/after.
+        log_event(user_guid=get_current_user_guid(), action='care_plan.goals_update',
+                  resource_type='CarePlan', resource_guid=cp.guid,
+                  data_subject_guid=cp.patient_guid,
+                  details={'action_limit_changes': goal_changes},
+                  ip_address=request.remote_addr)
     return jsonify(cp.to_dict()), 200
+
+
+def _initial_goals(requested, plandef_goals):
+    """Requester-supplied goals are theirs; otherwise plan's recommendation."""
+    if requested:
+        return action_limits.stamp_recommended_goals(requested, from_plan=False)
+    return action_limits.stamp_recommended_goals(plandef_goals, from_plan=True)
 
 
 @care_plans_bp.route('/careplans/<guid>/context', methods=['GET'])

@@ -1610,3 +1610,13 @@ context_service, plan_definition_service and form_service send request's read_on
 plan key. dispatch_service does NOT: plan checks a service key before the
 operator's bearer, so a read_only key would 403 the operator's write.
 pytest: 436 passed.
+
+## #987 — action limits vs recommended normal (2026-11-16)
+Operator: plan.pdhc holds RECOMMENDED NORMAL limits; ACTION limits are set per
+order/patient here. Before: an edited limit replaced the snapshot/goals
+wholesale, the SR edit audit had no details and the CarePlan goals PUT had no
+audit at all -- an action limit a clinician set and one inherited from plan
+were indistinguishable. Now every range/goal carries the frozen, server-owned
+`recommended*` and a `action_limit_source`/`limit_source`
+(plan_recommended | requester); invalid limits are refused (400); every change
+is audited with before/after. pytest: 454 passed.

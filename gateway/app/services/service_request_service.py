@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from app import db
 from app.models.security_models import ProviderAccessToken
 from app.models.service_request_models import ServiceRequest, ServiceRequestContractMatch, ServiceRequestForm
+from app.services import action_limits
 from app.services import patient_service, plan_definition_service, form_service
 from app.services import context_service
 from app.services.fhir_builder_service import build_service_request_resource, build_patient_excerpt
@@ -134,7 +135,7 @@ def create_service_request(patient_guid, plan_definition_guid, user_guid, org_gu
         patient_org_guid=patient_org_guid,
         patient_excerpt=patient_excerpt,
         plan_definition_guid=plan_definition_guid,
-        plan_definition_snapshot=plandef_data,
+        plan_definition_snapshot=action_limits.stamp_recommended(plandef_data),
         contract_guid=contract_guid,
         requester_user_guid=user_guid,
         requester_user_name=user_name,
@@ -293,7 +294,11 @@ def update_plan_definition_snapshot(guid, edited_snapshot, user_guid=None, ip_ad
     if sr.status != 'draft':
         return {'code': 'invalid_status', 'message': 'Can only edit PlanDefinition in draft status'}, 400
 
-    sr.plan_definition_snapshot = edited_snapshot
+    try:
+        merged, changes = action_limits.merge_edit(sr.plan_definition_snapshot, edited_snapshot)
+    except action_limits.InvalidActionLimit as e:
+        return {'code': 'invalid_action_limit', 'message': str(e)}, 400
+    sr.plan_definition_snapshot = merged
     db.session.commit()
 
     log_event(
@@ -301,6 +306,8 @@ def update_plan_definition_snapshot(guid, edited_snapshot, user_guid=None, ip_ad
         action='service_request.edit_plandef',
         resource_type='ServiceRequest',
         resource_guid=sr.guid,
+        data_subject_guid=sr.patient_guid,
+        details={'action_limit_changes': changes},
         ip_address=ip_address,
     )
 

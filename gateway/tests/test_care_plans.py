@@ -66,7 +66,9 @@ class TestCreateCarePlan:
                 'goals': custom,
             })
         body = r.get_json()
-        assert body['goals'] == custom
+        # #987: the requester's own goals are marked as theirs.
+        assert [{k: v for k, v in g.items() if k != 'limit_source'} for g in body['goals']] == custom
+        assert [g['limit_source'] for g in body['goals']] == ['requester']
 
     def test_missing_required_fields(self, client):
         r = client.post('/api/v1/careplans', json={'patient_guid': 'pat-1'})
