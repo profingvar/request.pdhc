@@ -1620,3 +1620,5 @@ were indistinguishable. Now every range/goal carries the frozen, server-owned
 `recommended*` and a `action_limit_source`/`limit_source`
 (plan_recommended | requester); invalid limits are refused (400); every change
 is audited with before/after. pytest: 454 passed.
+
+## #1011 (2026-11-16): request_pdhc_worker ran request-app:pre990 (2026-10-13), a month behind the app and without PLAN_SERVICE_KEY/PLAN_SOURCE_SERVICE. Re-pointed: request-worker:latest = request-app:latest (rollback tag request-worker:pre1011), `docker-compose up -d --no-deps --no-build worker`. Checks: running, same code hash as app, plan key vars set, app/db untouched; smoke 8/8. EVERY request app deploy must now also re-tag + recreate the worker, or it drifts again.
