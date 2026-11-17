@@ -78,6 +78,22 @@ def enqueue(*, event_type, provider_org_guid, service_request_guid,
     is visible — but it goes straight to dead_letter so we don't
     silently retry an unsignable payload.
     """
+    # #984: a diagnosis-review ServiceRequest is never announced to a
+    # provider. Refused here, at the single enqueue point, so no caller can
+    # forget it. Returns None (no row) — callers treat enqueue as best-effort.
+    from app.models.service_request_models import ServiceRequest
+    from app.services.diagnosis_review import is_diagnosis_review
+    if service_request_guid and is_diagnosis_review(
+            ServiceRequest.query.filter_by(guid=service_request_guid).first()):
+        logger.warning('webhook refused for diagnosis-review sr=%s',
+                       service_request_guid)
+        log_event(action='webhook.refused', resource_type='ServiceRequest',
+                  resource_guid=service_request_guid,
+                  details={'reason': 'diagnosis_review_not_dispatchable',
+                           'event_type': event_type,
+                           'provider_org_guid': provider_org_guid})
+        return None
+
     body_str = json.dumps(payload, separators=(',', ':'), sort_keys=True)
 
     secret = get_signing_secret(provider_org_guid)

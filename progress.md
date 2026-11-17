@@ -1622,3 +1622,52 @@ were indistinguishable. Now every range/goal carries the frozen, server-owned
 is audited with before/after. pytest: 454 passed.
 
 ## #1011 (2026-11-16): request_pdhc_worker ran request-app:pre990 (2026-10-13), a month behind the app and without PLAN_SERVICE_KEY/PLAN_SOURCE_SERVICE. Re-pointed: request-worker:latest = request-app:latest (rollback tag request-worker:pre1011), `docker-compose up -d --no-deps --no-build worker`. Checks: running, same code hash as app, plan key vars set, app/db untouched; smoke 8/8. EVERY request app deploy must now also re-tag + recreate the worker, or it drifts again.
+
+## #984 — diagnosis review as a PlanDefinition step, contract §2 (2026-11-17)
+Contract: `plans/984_diagnosis_review_contract.md` (operator-approved; plan.pdhc
+and icd11.pdhc build against it in parallel). Not committed, not deployed.
+
+What was built: at finalize, each PlanDefinition action (`fhir_data.action`,
+nested too) with `definitionCanonical` =
+`https://icd11.pdhc.se/fhir/ActivityDefinition/diagnosis-review` becomes its
+own ACTIVE ServiceRequest (`kind=diagnosis-review`, `instantiatesCanonical` =
+that canonical, `diagnosis-code-scope` extensions verbatim, `performerType`
+clinician, `basedOn` = the order SR, no contract). Work link
+`<ICD11_BASE_URL>/session/<guid>`. Never pushed / 1177 / matched / provider
+download / webhook — each path refuses it by name. icd11.pdhc reads it
+(`GET /api/v1/internal/diagnosis-review/<guid>`) and completes it
+(`POST …/complete`, body `{"conditions":[{"id","version_id"}]}`) with its OWN
+named key (`X-Source-Service: icd11.pdhc` + `X-Service-Key`), read-only except
+that route; completion goes through `mark_service_request_completed`, which
+refuses the kind from any other source. Lists, detail view and timeline show
+"Diagnosgenomgång (ICD-11) — <kodområde>".
+
+Interpretations (contract silent): its own SR rather than part of the order
+(two `instantiatesCanonical`s/performers/lifecycles); created at FINALIZE, not
+draft create; step without scope refuses finalize (409); performerType
+`{"text":"clinician"}` (no coding); status `completed`; repeat with the same
+conditions = 200, with different = 409; empty conditions list allowed; endpoint
+paths and body shape chosen here (contract gives none); order revoke cascades.
+
+Tests: `tests/test_diagnosis_review_984.py` — 48 tests (creation, verbatim
+scope, work link, nested steps, idempotent creation, missing scope, form-only
+plan unchanged, order's form still reaches 1177, no-dispatch on push/push-one/
+1177/match/dispatch/download/webhook/API push, service read + 5 refused
+credentials + unset key + wrong kind + 404 + key opens nothing else + read-only
+rule, completion happy/through-mark_service_request_completed/repeat/repeat-
+different/wrong kind/inactive×3/wrong caller×4/invalid body×4/empty list, revoke
+cascade, list/detail/timeline views).
+pytest: 454 passed before → **502 passed** after.
+
+Mutation controls (each restored, sha256 verified identical):
+| mutation | result |
+|---|---|
+| dispatch these to the patient (dispatch_refusal → None, 1177 guard off) | 5 failed |
+| accept completion from another service — service function check off | 2 failed |
+| accept completion from another service — route allow-list check off | 1 failed |
+| drop the scope extension (`code_scope=[]`) | 5 failed |
+
+Deploy (operator): migration `e1f2a3b4c5d6` (additive, nullable); `.env` gets
+`ICD11_PDHC_SERVICE_KEY` (same value icd11.pdhc sends; unset = refuses
+everyone) and optionally `ICD11_BASE_URL` (default https://icd11.pdhc.se);
+re-tag + recreate the worker with the app (#1011).

@@ -265,6 +265,61 @@ a PAT for the provider org if one doesn't already exist.
 Required body: `provider_org_guid`, `contract_guid`. Pulls push-config
 from sso.pdhc and decides delivery_mode (push vs poll) accordingly.
 
+### #984 — icd11.pdhc: diagnosis-review ServiceRequests
+
+Contract: `plans/984_diagnosis_review_contract.md` §2. These two routes do
+**not** take `INTERNAL_SERVICE_KEY`. They take icd11.pdhc's own named key:
+
+```
+X-Source-Service: icd11.pdhc
+X-Service-Key: <ICD11_PDHC_SERVICE_KEY>
+```
+
+icd11.pdhc is **read-only** (`READ_ONLY_SERVICE_SOURCES`); the completion route
+is its single write grant. Its key opens no other endpoint. Missing/unknown/
+wrong key → `401 unauthenticated`; a different valid named service → `403
+service_not_permitted`.
+
+#### `GET /api/v1/internal/diagnosis-review/<sr_guid>`
+
+```json
+{"service_request_guid": "…", "kind": "diagnosis-review", "status": "active",
+ "patient_guid": "…", "instantiates_canonical":
+   "https://icd11.pdhc.se/fhir/ActivityDefinition/diagnosis-review",
+ "code_scope": ["5A1"], "performer_type": "clinician",
+ "requester_org_guid": "…", "patient_org_guid": "…", "based_on_guid": "<order SR>",
+ "work_link": "https://icd11.pdhc.se/session/<sr_guid>",
+ "fhir_resource": {"resourceType": "ServiceRequest", "instantiatesCanonical": […],
+                   "extension": [<diagnosis-code-scope, verbatim>],
+                   "performerType": {"text": "clinician"},
+                   "subject": {"reference": "Patient/<guid>"}, …}}
+```
+
+`404 not_found`; `409 not_diagnosis_review` (no SR data returned).
+
+#### `POST /api/v1/internal/diagnosis-review/<sr_guid>/complete`
+
+Call only after the CDR accepted the writes. Body:
+
+```json
+{"conditions": [{"id": "<CDR Condition id>", "version_id": "<CDR version id>"}]}
+```
+
+`versionId` is accepted as an alias; an empty list is a review that changed
+nothing. Completes through `mark_service_request_completed` → status
+`completed`, `completion_record` stored, FHIR `supportingInfo` =
+`Condition/<id>/_history/<version_id>`.
+
+| outcome | status / code |
+|---|---|
+| completed | `200`, `already_completed: false` |
+| same conditions again | `200`, `already_completed: true` (idempotent) |
+| other conditions after completion | `409 already_completed_with_other_conditions` |
+| not a diagnosis-review SR | `409 not_diagnosis_review` |
+| SR not active (draft/revoked/archived) | `409 service_request_not_active` |
+| bad body | `400 invalid_conditions` |
+| caller is not icd11.pdhc | `401` / `403 service_not_permitted`; via gateway's `/internal/service-request/<g>/complete` → `403 caller_not_icd11` |
+
 ---
 
 For the wire shapes of FHIR Contract references and the contract-status

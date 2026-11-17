@@ -36,6 +36,10 @@ def find_eligible_providers(service_request_guid):
         return {'code': 'not_found', 'message': 'ServiceRequest not found'}, 404
     if sr.status != 'active':
         return {'code': 'invalid_status', 'message': 'ServiceRequest must be active to match'}, 400
+    # #984: no provider is eligible for a clinician's diagnosis review.
+    from app.services.diagnosis_review import is_diagnosis_review
+    if is_diagnosis_review(sr):
+        return {'eligible': []}, 200
 
     # Contracts may reference the PlanDefinition's database guid or its fhir_id.
     snap = sr.plan_definition_snapshot or {}
@@ -82,6 +86,11 @@ def dispatch_to_provider(service_request_guid, contract_guid, provider_org_guid,
         return {'code': 'not_found', 'message': 'ServiceRequest not found'}, 404
     if sr.status != 'active':
         return {'code': 'invalid_status', 'message': 'ServiceRequest must be active'}, 400
+    # #984: a diagnosis review is a clinician's task in icd11.pdhc, never sent.
+    from app.services.diagnosis_review import dispatch_refusal
+    refusal = dispatch_refusal(sr)
+    if refusal:
+        return refusal
 
     # Prevent duplicate
     existing = ServiceRequestContractMatch.query.filter_by(
@@ -147,6 +156,11 @@ def find_and_create_matches(service_request_guid, user_guid=None, ip_address=Non
         return {'code': 'not_found', 'message': 'ServiceRequest not found'}, 404
     if sr.status != 'active':
         return {'code': 'invalid_status', 'message': 'ServiceRequest must be active to match'}, 400
+    # #984: a diagnosis review is a clinician's task in icd11.pdhc, never sent.
+    from app.services.diagnosis_review import dispatch_refusal
+    refusal = dispatch_refusal(sr)
+    if refusal:
+        return refusal
 
     # Contracts may reference the PlanDefinition's database guid or its fhir_id.
     snap = sr.plan_definition_snapshot or {}

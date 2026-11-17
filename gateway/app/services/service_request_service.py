@@ -334,6 +334,18 @@ def finalize_service_request(guid, user_guid=None, ip_address=None):
     # Build the FHIR R5 ServiceRequest with contained CarePlan + Questionnaires
     sr.fhir_resource = build_service_request_resource(sr)
     sr.status = 'active'
+
+    # #984: each diagnosis-review step becomes its own active ServiceRequest
+    # (performer: clinician, in icd11.pdhc), in the same transaction. A step
+    # without its required code scope refuses the finalize, by name, before
+    # anything is written.
+    from app.services import diagnosis_review
+    try:
+        children = diagnosis_review.create_for_order(
+            sr, user_guid=user_guid, ip_address=ip_address)
+    except diagnosis_review.DiagnosisReviewStepInvalid as e:
+        db.session.rollback()
+        return {'code': e.code, 'message': str(e)}, 409
     db.session.commit()
 
     log_event(
@@ -341,6 +353,8 @@ def finalize_service_request(guid, user_guid=None, ip_address=None):
         action='service_request.finalize',
         resource_type='ServiceRequest',
         resource_guid=sr.guid,
+        details={'diagnosis_review_guids': [c.guid for c in children]}
+        if children else None,
         ip_address=ip_address,
     )
 
@@ -382,6 +396,18 @@ def revoke_service_request(guid, user_guid=None, ip_address=None):
         return {'code': 'has_accepted', 'message': 'Cannot revoke — has accepted matches'}, 400
 
     sr.status = 'revoked'
+    # #984: an order's open diagnosis reviews go with it — a revoked order
+    # must not leave a clinician's task active in icd11.pdhc. Completed ones
+    # are history and stay as they are.
+    from app.services import diagnosis_review
+    open_reviews = ServiceRequest.query.filter(
+        ServiceRequest.based_on_guid == sr.guid,
+        ServiceRequest.kind == diagnosis_review.KIND,
+        ServiceRequest.status.in_(('draft', 'active')),
+    ).all()
+    for child in open_reviews:
+        child.status = 'revoked'
+        child.fhir_resource = diagnosis_review.build_fhir_resource(child)
     db.session.commit()
 
     log_event(
@@ -389,6 +415,8 @@ def revoke_service_request(guid, user_guid=None, ip_address=None):
         action='service_request.revoke',
         resource_type='ServiceRequest',
         resource_guid=sr.guid,
+        details={'diagnosis_reviews_revoked': [c.guid for c in open_reviews]}
+        if open_reviews else None,
         ip_address=ip_address,
     )
 

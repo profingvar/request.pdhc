@@ -8,7 +8,11 @@ import logging
 import requests as http_requests
 from flask import Blueprint, current_app, request, jsonify
 
-from app.middleware.auth_middleware import requires_service_key
+from flask import g
+
+from app.middleware.auth_middleware import (
+    requires_named_service, requires_service_key,
+)
 
 internal_bp = Blueprint('internal', __name__)
 
@@ -206,4 +210,71 @@ def mark_sr_complete(sr_guid):
     result, code = mark_service_request_completed(
         sr_guid, source='gateway.pdhc', ip_address=request.remote_addr,
     )
+    return jsonify(result), code
+
+
+# ── #984: icd11.pdhc — diagnosis-review ServiceRequests ─────────────────
+#
+# Contract: plans/984_diagnosis_review_contract.md section 2. Authenticated
+# by icd11.pdhc's OWN key (X-Source-Service: icd11.pdhc + X-Service-Key), not
+# by INTERNAL_SERVICE_KEY. icd11.pdhc is read-only (READ_ONLY_SERVICE_SOURCES)
+# except for the completion route, which grants it the one write.
+
+
+def _diagnosis_review_or_refusal(sr_guid):
+    from app.models.service_request_models import ServiceRequest
+    from app.services import diagnosis_review
+    sr = ServiceRequest.query.filter_by(guid=sr_guid).first()
+    if sr is None:
+        return None, (jsonify({'code': 'not_found',
+                               'message': 'ServiceRequest not found'}), 404)
+    if not diagnosis_review.is_diagnosis_review(sr):
+        # Named, and WITHOUT the row: icd11.pdhc learns nothing about an SR
+        # that is not its business.
+        return None, (jsonify({'code': 'not_diagnosis_review',
+                               'message': 'ServiceRequest is not a '
+                                          'diagnosis-review ServiceRequest'}), 409)
+    return sr, None
+
+
+@internal_bp.route('/internal/diagnosis-review/<sr_guid>', methods=['GET'])
+@requires_named_service('icd11.pdhc')
+def get_diagnosis_review(sr_guid):
+    """icd11.pdhc reads the SR: patient, status, canonical, code scope."""
+    from app.services import diagnosis_review
+    from app.services.audit_service import log_event
+    sr, refusal = _diagnosis_review_or_refusal(sr_guid)
+    if refusal:
+        return refusal
+    log_event(action='service_request.diagnosis_review.read',
+              resource_type='ServiceRequest', resource_guid=sr.guid,
+              data_subject_guid=sr.patient_guid,
+              details={'source': g.source_service},
+              ip_address=request.remote_addr)
+    return jsonify(diagnosis_review.read_view(sr)), 200
+
+
+@internal_bp.route('/internal/diagnosis-review/<sr_guid>/complete',
+                   methods=['POST'])
+@requires_named_service('icd11.pdhc', write_grant=('icd11.pdhc',))
+def complete_diagnosis_review(sr_guid):
+    """icd11.pdhc completes the SR after the CDR accepted its writes.
+
+    Body: {"conditions": [{"id": "<CDR Condition id>",
+                           "version_id": "<CDR version id>"}, ...]}
+    Through completion_service.mark_service_request_completed. Idempotent: the
+    same conditions again -> 200 with already_completed=true.
+    """
+    from app.services.completion_service import mark_service_request_completed
+    sr, refusal = _diagnosis_review_or_refusal(sr_guid)
+    if refusal:
+        return refusal
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or 'conditions' not in body:
+        return jsonify({'code': 'invalid_conditions',
+                        'message': 'body must be {"conditions": [{"id": ..., '
+                                   '"version_id": ...}]}'}), 400
+    result, code = mark_service_request_completed(
+        sr.guid, source=g.source_service, ip_address=request.remote_addr,
+        cdr_conditions=body['conditions'])
     return jsonify(result), code

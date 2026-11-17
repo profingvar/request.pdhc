@@ -45,6 +45,23 @@
     <p style="font-size:0.85rem; color:var(--text-secondary);">GUID: {{ sr.patient_guid }}</p>
   </div>
 
+  {% if sr.kind == 'diagnosis-review' %}
+  {# #984: performed by a clinician in icd11.pdhc; never sent to patient or provider #}
+  <div class="card">
+    <h3><i data-lucide="stethoscope" style="width:1rem;height:1rem"></i> Diagnosgenomgång (ICD-11)</h3>
+    <p><strong>Kodområde:</strong> {{ sr.code_area }}</p>
+    <p style="font-size:0.85rem;">{{ (sr.plan_definition_snapshot or {}).get('title', '') }}</p>
+    <p style="font-size:0.85rem; color:var(--text-secondary);">Utförs av kliniker i icd11.pdhc. Skickas inte till patient eller vårdgivare.</p>
+    {% if sr.based_on_guid %}
+    <p style="font-size:0.85rem;">Del av beställning <a href="{{ url_for('service_requests_web.view_detail', guid=sr.based_on_guid) }}">{{ sr.based_on_guid[:8] }}…</a></p>
+    {% endif %}
+    {% if sr.status == 'active' %}
+    <a href="{{ sr.work_link }}" target="_blank" rel="noopener" class="btn btn-sm btn-primary">Öppna diagnosgenomgången</a>
+    {% elif sr.status == 'completed' and sr.completion_record %}
+    <p style="font-size:0.85rem;">Klar {{ sr.completion_record.completed_at[:10] }} — {{ sr.completion_record.conditions|length }} diagnosversion(er) skrivna i CDR.</p>
+    {% endif %}
+  </div>
+  {% else %}
   <div class="card">
     <h3><i data-lucide="file-text" style="width:1rem;height:1rem"></i> PlanDefinition</h3>
     {% set snap = sr.plan_definition_snapshot %}
@@ -58,7 +75,30 @@
     <a href="{{ url_for('service_requests_web.edit_plan', guid=sr.guid) }}" class="btn btn-sm btn-secondary">Edit Snapshot</a>
     {% endif %}
   </div>
+  {% endif %}
 </div>
+
+{% if diagnosis_reviews %}
+<div class="card" style="margin-top:1rem;">
+  <h3><i data-lucide="stethoscope" style="width:1rem;height:1rem"></i> Diagnosgenomgång (ICD-11)</h3>
+  <table>
+    <thead><tr><th>Steg</th><th>Kodområde</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for dr in diagnosis_reviews %}
+      <tr>
+        <td>{{ (dr.plan_definition_snapshot or {}).get('title', '') }}</td>
+        <td>{{ dr.code_area }}</td>
+        <td><span class="badge badge-{% if dr.status == 'active' %}success{% elif dr.status == 'revoked' %}secondary{% else %}info{% endif %}">{{ dr.status }}</span></td>
+        <td style="display:flex; gap:0.5rem;">
+          <a href="{{ url_for('service_requests_web.view_detail', guid=dr.guid) }}" class="btn btn-sm btn-secondary">Visa</a>
+          {% if dr.status == 'active' %}<a href="{{ dr.work_link }}" target="_blank" rel="noopener" class="btn btn-sm btn-primary">Öppna</a>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
 
 <div class="card" style="margin-top:1rem;">
   <h3><i data-lucide="clipboard-list" style="width:1rem;height:1rem"></i> Attached Forms</h3>
@@ -237,7 +277,7 @@
 </div>
 {% endif %}
 
-{% if sr.fhir_resource %}
+{% if sr.fhir_resource and sr.kind != 'diagnosis-review' %}
 {% set fhir = sr.fhir_resource %}
 <div class="card" style="margin-top:1rem;">
   <h3><i data-lucide="file-json" style="width:1rem;height:1rem"></i> Provider Delivery Blob (dev)</h3>
@@ -420,7 +460,7 @@
     </tbody>
   </table>
 </div>
-{% elif sr.status == 'active' and not matches %}
+{% elif sr.status == 'active' and not matches and sr.kind != 'diagnosis-review' %}
 <div class="card" style="margin-top:1rem;">
   <h3><i data-lucide="search" style="width:1rem;height:1rem"></i> Eligible Providers</h3>
   <p style="color:var(--text-muted);">No contracts found for this PlanDefinition. Create a contract in contract.pdhc first.</p>

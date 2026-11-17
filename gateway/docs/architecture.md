@@ -147,6 +147,21 @@ snapshot**.
 Relationships: `contract_matches` → `ServiceRequestContractMatch`; `forms` →
 `ServiceRequestForm` (ordered by `sort_order`).
 
+**#984 — diagnosis-review ServiceRequests.** When an order is finalized, each
+PlanDefinition action (in `plan_definition_snapshot.fhir_data.action`, nested
+included) whose `definitionCanonical` is
+`https://icd11.pdhc.se/fhir/ActivityDefinition/diagnosis-review` becomes its
+OWN active ServiceRequest (`app/services/diagnosis_review.py`). Extra columns,
+NULL on ordinary SRs: `kind` (`diagnosis-review`), `instantiates_canonical`,
+`code_scope` (the action's `diagnosis-code-scope` extensions, verbatim),
+`performer_type` (`clinician`), `based_on_guid` (the order SR; FHIR `basedOn`),
+`completion_record` (CDR Condition ids + version ids reported by icd11.pdhc).
+Work link `<ICD11_BASE_URL>/session/<guid>`. No `contract_guid`. It is never
+pushed, sent to 1177, matched, downloadable by a provider, or announced by
+webhook — each of those paths refuses it (`dispatch_refusal`). Revoking the
+order revokes its open reviews. A step without a scope extension refuses the
+finalize (`409 diagnosis_review_scope_missing`).
+
 ### 4.3 ServiceRequestForm (`service_request_forms`)
 
 Links an SR to one or more forms from the Plan catalogue. Unique on
@@ -443,6 +458,18 @@ identity truth.
 - `POST /api/v1/internal/auto-provision-pat` — called by contract.pdhc on
   contract create/update; fetches push-config from SSO and issues a PAT if none
   exists (poll vs push decided by whether SSO returned a push endpoint).
+
+- **#984, named key, not `X-Service-Key` alone:**
+  `GET /api/v1/internal/diagnosis-review/<sr_guid>` and
+  `POST /api/v1/internal/diagnosis-review/<sr_guid>/complete`, for icd11.pdhc
+  only (`X-Source-Service: icd11.pdhc` + `X-Service-Key` =
+  `ICD11_PDHC_SERVICE_KEY`). `requires_named_service` in
+  `auth_middleware.py`: `KNOWN_SERVICE_KEYS` (name → env var, the cdr/plan
+  pattern) and `READ_ONLY_SERVICE_SOURCES` (cdr's #760 rule: GET/HEAD/OPTIONS
+  only unless the route grants a write). The completion route is icd11's one
+  write grant. `mark_service_request_completed` refuses a diagnosis-review SR
+  from any other source (`caller_not_icd11`), so gateway's `.../complete`
+  cannot close one. See `docs/api.md` §13.
 
 ### 5.4 Outbound webhook subsystem (`request_pdhc_worker`)
 

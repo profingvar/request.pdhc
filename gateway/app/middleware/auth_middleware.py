@@ -226,3 +226,85 @@ def requires_role(role):
             return f(*args, **kwargs)
         return decorated
     return decorator
+
+
+# ---------------------------------------------------------------------------
+# #984 — NAMED service identities (X-Source-Service + X-Service-Key)
+# ---------------------------------------------------------------------------
+#
+# `requires_service_key` above is one shared, anonymous key (gateway.pdhc and
+# contract.pdhc both hold INTERNAL_SERVICE_KEY), so it cannot say WHO called.
+# The diagnosis-review completion must refuse every caller but icd11.pdhc, so
+# icd11.pdhc gets its own key and its own name — the header pair and the
+# name -> env-var map used by cdr (KNOWN_FHIR_SERVICES) and plan (#931).
+#
+# READ-ONLY BY DEFAULT, as cdr's #760: an identity in
+# READ_ONLY_SERVICE_SOURCES may use GET/HEAD/OPTIONS only, unless the ROUTE
+# grants that identity a write explicitly (`write_grant=`). icd11.pdhc's only
+# write grant is the diagnosis-review completion endpoint. These keys open
+# nothing else: `requires_auth`/`requires_service_key` never read them.
+KNOWN_SERVICE_KEYS = {
+    'icd11.pdhc': 'ICD11_PDHC_SERVICE_KEY',
+}
+READ_ONLY_SERVICE_SOURCES = frozenset({'icd11.pdhc'})
+_SAFE_METHODS = frozenset({'GET', 'HEAD', 'OPTIONS'})
+
+
+def named_service_outcome(source, key, method, allowed, write_grant=()):
+    """Pure decision: (None, source) when admitted, else (body, status).
+
+    Separated so the read-only rule can be tested without issuing a write
+    (CLAUDE.md: never verify a write grant by writing).
+    """
+    source = (source or '').strip()
+    key = (key or '').strip()
+    want = ', '.join(sorted(allowed))
+    if not source or not key:
+        return {'code': 'unauthenticated',
+                'message': f'X-Source-Service and X-Service-Key of {want} '
+                           f'required'}, 401
+    cfg_var = KNOWN_SERVICE_KEYS.get(source)
+    expected = (current_app.config.get(cfg_var) or '').strip() if cfg_var else ''
+    if not expected or not hmac_mod.compare_digest(key, expected):
+        # Unknown name, unset key and wrong key look the same from outside.
+        return {'code': 'unauthenticated',
+                'message': f'X-Source-Service and X-Service-Key of {want} '
+                           f'required'}, 401
+    if source not in allowed:
+        return {'code': 'service_not_permitted',
+                'message': f'{source} may not call this endpoint; only {want}'}, 403
+    if (source in READ_ONLY_SERVICE_SOURCES and method not in _SAFE_METHODS
+            and source not in write_grant):
+        return {'code': 'service_read_only',
+                'message': f'{source} holds a read-only service key'}, 403
+    return None, source
+
+
+def requires_named_service(*allowed, write_grant=()):
+    """Admit only the named service identities in `allowed` (see above).
+
+    Never bypassed by AUTH_DISABLED: a machine identity is not a dev login.
+    Sets g.source_service.
+    """
+    allowed = frozenset(allowed)
+    write_grant = frozenset(write_grant)
+
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            body, outcome = named_service_outcome(
+                request.headers.get('X-Source-Service'),
+                request.headers.get('X-Service-Key'),
+                request.method, allowed, write_grant)
+            if body is not None:
+                from app.services.audit_service import log_event
+                log_event(action='service_key.rejected',
+                          details={'endpoint': request.path,
+                                   'source': (request.headers.get('X-Source-Service') or '')[:64],
+                                   'code': body['code']},
+                          ip_address=request.remote_addr)
+                return jsonify(body), outcome
+            g.source_service = outcome
+            return f(*args, **kwargs)
+        return decorated
+    return decorator

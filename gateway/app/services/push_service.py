@@ -52,6 +52,11 @@ def push_to_provider(match_guid, user_guid=None, ip_address=None):
     sr = ServiceRequest.query.filter_by(guid=match.service_request_guid).first()
     if not sr:
         return {'code': 'not_found', 'message': 'ServiceRequest not found'}, 404
+    # #984: a diagnosis review is a clinician's task in icd11.pdhc, never sent.
+    from app.services.diagnosis_review import dispatch_refusal
+    refusal = dispatch_refusal(sr)
+    if refusal:
+        return refusal
 
     if sr.status != 'active':
         return {'code': 'invalid_status',
@@ -204,6 +209,11 @@ def push_all_matches(service_request_guid, user_guid=None, ip_address=None):
     sr = ServiceRequest.query.filter_by(guid=service_request_guid).first()
     if not sr:
         return {'code': 'not_found', 'message': 'ServiceRequest not found'}, 404
+    # #984: a diagnosis review is a clinician's task in icd11.pdhc, never sent.
+    from app.services.diagnosis_review import dispatch_refusal
+    refusal = dispatch_refusal(sr)
+    if refusal:
+        return refusal
 
     matches = ServiceRequestContractMatch.query.filter_by(
         service_request_guid=service_request_guid,
@@ -237,6 +247,11 @@ def _push_forms_to_1177(sr, user_guid=None, ip_address=None):
 
     Returns a status dict (not a tuple).
     """
+    # #984: never to the patient app.
+    from app.services.diagnosis_review import is_diagnosis_review
+    if is_diagnosis_review(sr):
+        return {'status': 'refused', 'reason': 'diagnosis_review_not_dispatchable'}
+
     webhook_url = current_app.config.get('FORMS_1177_WEBHOOK_URL', '')
     api_key = current_app.config.get('FORMS_1177_API_KEY', '')
     org_guid = current_app.config.get('FORMS_1177_ORG_GUID', '')

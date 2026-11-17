@@ -15,6 +15,7 @@ from app.services.match_service import (
 from app.services.push_service import push_all_matches, list_receipts_for_request
 from app.services.auth_service import get_current_user_guid, get_current_access_blob
 from app.services import patient_access
+from app.services import diagnosis_review
 from app.services.audit_service import log_event
 from app.models.service_request_models import ServiceRequest
 import functools
@@ -464,7 +465,13 @@ def view_detail(guid):
         elif isinstance(cat_data, list):
             available_forms = cat_data
 
+    # #984: an order lists the diagnosis reviews created from it.
+    diagnosis_reviews = [c.to_dict() for c in ServiceRequest.query.filter_by(
+        based_on_guid=guid, kind=diagnosis_review.KIND
+    ).order_by(ServiceRequest.created_at).all()]
+
     return render_template('service_requests/view.html', sr=data, matches=matches,
+                           diagnosis_reviews=diagnosis_reviews,
                            receipts=receipts, sr_forms=sr_forms, available_forms=available_forms,
                            contract_name=contract_name, contract_names=contract_names,
                            eligible_providers=eligible)
@@ -497,13 +504,16 @@ def timeline_view(guid):
 
     snapshot = dict(data.get('plan_definition_snapshot') or {})
     activities = snapshot.get('activities')
-    if not activities and data.get('plan_definition_guid'):
+    is_review = diagnosis_review.is_diagnosis_review(data)
+    if not activities and data.get('plan_definition_guid') and not is_review:
         pd, st = plan_definition_service.get_plan_definition(
             data['plan_definition_guid'])
         if st == 200 and isinstance(pd, dict):
             activities = pd.get('activities') or []
             snapshot.setdefault('title', pd.get('title') or pd.get('name'))
-    activities = activities or []
+    # #984: diagnosis-review steps are lines too, labelled in Swedish with
+    # their code area (an order's steps, or a review SR's own single step).
+    activities = list(activities or []) + diagnosis_review.timeline_activities(snapshot)
 
     tl = timeline_service.build_timeline(
         activities,
@@ -534,7 +544,8 @@ def plan_timeline_preview(plandef_guid):
     if st != 200 or not isinstance(pd, dict):
         flash('PlanDefinition not found', 'danger')
         return redirect(url_for('service_requests_web.create_view'))
-    activities = pd.get('activities') or []
+    activities = (list(pd.get('activities') or [])
+                  + diagnosis_review.timeline_activities(pd))  # #984
     tl = timeline_service.build_timeline(activities)
     plan_title = pd.get('title') or pd.get('name') or 'PlanDefinition'
     return render_template(

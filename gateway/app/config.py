@@ -91,6 +91,13 @@ class Config:
     # Internal service-to-service auth (gateway.pdhc calls these endpoints)
     INTERNAL_SERVICE_KEY = os.environ.get('INTERNAL_SERVICE_KEY', '')
 
+    # #984: icd11.pdhc — the clinician's diagnosis-review session lives there.
+    # Work link = <ICD11_BASE_URL>/session/<service_request_guid>.
+    ICD11_BASE_URL = os.environ.get('ICD11_BASE_URL', 'https://icd11.pdhc.se')
+    # icd11.pdhc's own service key INTO request.pdhc (X-Source-Service:
+    # icd11.pdhc + X-Service-Key). Unset = the identity admits nobody.
+    ICD11_PDHC_SERVICE_KEY = os.environ.get('ICD11_PDHC_SERVICE_KEY', '')
+
     # Provider delivery
     HMAC_SECRET = os.environ.get('HMAC_SECRET', SECRET_KEY)
     PAT_DEFAULT_EXPIRY_DAYS = int(os.environ.get('PAT_DEFAULT_EXPIRY_DAYS', '365'))

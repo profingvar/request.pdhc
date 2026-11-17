@@ -45,7 +45,12 @@
       </td>
       <td>
         {% set snap = sr.plan_definition_snapshot %}
-        {% if snap %}
+        {% if sr.kind == 'diagnosis-review' %}
+          {# #984: a clinician's task in icd11.pdhc, not a dispatched plan #}
+          <strong>Diagnosgenomgång (ICD-11)</strong>
+          <span class="badge badge-info" title="Kodområde">{{ sr.code_area }}</span>
+          {% if sr.status == 'active' %}<a href="{{ sr.work_link }}" target="_blank" rel="noopener" class="btn btn-sm btn-secondary">Öppna</a>{% endif %}
+        {% elif snap %}
           {{ snap.get('title', snap.get('name', sr.plan_definition_guid[:8] ~ '...')) }}
         {% else %}
           {{ sr.plan_definition_guid[:8] }}...

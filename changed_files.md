@@ -674,3 +674,20 @@ false for 11 files; a hand survey cannot be the gate here.
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/service_request_service.py — snapshot stamped at create; draft edits merged, validated, audited with details
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/api/care_plans.py — goals stamped at create; PUT merged, validated, AUDITED (was unaudited)
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_action_limits_987.py (NEW), /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_care_plans.py (requester goals marked)
+
+## #984 — diagnosis review as a PlanDefinition step, contract §2 (2026-11-17)
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/diagnosis_review.py (NEW) — recognise the step, create the SR at finalize, FHIR resource, work link, dispatch refusal, timeline lines
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/models/service_request_models.py — kind, instantiates_canonical, code_scope, performer_type, based_on_guid, completion_record; to_dict fields
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/migrations/versions/e1f2a3b4c5d6_sr_diagnosis_review.py (NEW) — additive columns + 2 indexes
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/config.py — ICD11_BASE_URL, ICD11_PDHC_SERVICE_KEY
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/.env.example — the two keys (no values)
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/middleware/auth_middleware.py — KNOWN_SERVICE_KEYS, READ_ONLY_SERVICE_SOURCES, named_service_outcome, requires_named_service
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/api/internal.py — GET /internal/diagnosis-review/<guid>, POST …/complete
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/completion_service.py — diagnosis-review branch in mark_service_request_completed (icd11.pdhc only, CDR condition record, idempotent)
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/service_request_service.py — finalize creates the review SRs; revoke cascades to open ones
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/push_service.py, match_service.py, provider_feed_service.py, webhook_dispatcher.py — refuse a diagnosis-review SR
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/routes/service_requests.py — timeline lines, order detail lists its reviews
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/templates/service_requests/list.html, view.html — "Diagnosgenomgång (ICD-11)" + kodområde + work link
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_diagnosis_review_984.py (NEW) — 48 tests
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/docs/api.md, docs/architecture.md — endpoints, auth, model
+- /Users/martiningvar/T7_sidewinder/request.pdhc/progress.md, changed_files.md

@@ -47,6 +47,18 @@ class ServiceRequest(db.Model):
 
     notes = db.Column(db.Text, nullable=True)
 
+    # #984: a diagnosis-review step becomes its own ServiceRequest (see
+    # app/services/diagnosis_review.py). NULL kind = the ordinary order SR.
+    kind = db.Column(db.String(40), nullable=True, index=True)
+    instantiates_canonical = db.Column(db.String(255), nullable=True)
+    # the action's diagnosis-code-scope extensions, verbatim (FHIR Extension[])
+    code_scope = db.Column(db.JSON, nullable=True)
+    performer_type = db.Column(db.String(40), nullable=True)
+    # the order SR this one was created from (FHIR basedOn)
+    based_on_guid = db.Column(db.String(36), nullable=True, index=True)
+    # what icd11.pdhc reported at completion: CDR Condition ids + version ids
+    completion_record = db.Column(db.JSON, nullable=True)
+
     # Validity period
     period_start = db.Column(db.DateTime, nullable=True)
     period_end = db.Column(db.DateTime, nullable=True)
@@ -89,7 +101,25 @@ class ServiceRequest(db.Model):
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
             'forms': [f.to_dict() for f in self.forms],
+            **self._diagnosis_review_dict(),
         }
+
+    def _diagnosis_review_dict(self):
+        """#984 fields; display_label/work_link only for a diagnosis review."""
+        out = {
+            'kind': self.kind,
+            'instantiates_canonical': self.instantiates_canonical,
+            'code_scope': self.code_scope,
+            'performer_type': self.performer_type,
+            'based_on_guid': self.based_on_guid,
+            'completion_record': self.completion_record,
+        }
+        from app.services import diagnosis_review as dr
+        if self.kind == dr.KIND:
+            out['display_label'] = dr.display_label(self.code_scope)
+            out['code_area'] = ', '.join(dr.scope_prefixes(self.code_scope))
+            out['work_link'] = dr.work_link(self.guid)
+        return out
 
 
 class ServiceRequestForm(db.Model):

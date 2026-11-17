@@ -97,6 +97,11 @@ def download_bundle(service_request_guid, provider_org_guid, contract_guid,
     sr = ServiceRequest.query.filter_by(guid=service_request_guid).first()
     if not sr:
         return {'code': 'not_found', 'message': 'ServiceRequest not found'}, 404
+    # #984: a diagnosis review is a clinician's task in icd11.pdhc, never sent.
+    from app.services.diagnosis_review import dispatch_refusal
+    refusal = dispatch_refusal(sr)
+    if refusal:
+        return refusal
 
     # Archived SRs remain downloadable so providers can still fetch the
     # bundle and submit late reports (ticket #90). Drafts and revoked
