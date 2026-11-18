@@ -23,7 +23,14 @@ DEAD_STATUSES = {'revoked', 'terminated', 'cancelled'}
 
 
 def fetch_scope(contract_guid):
-    """Fetch scope from contract.pdhc's internal endpoint.
+    """Fetch scope from contract.pdhc's public scope endpoint.
+
+    Uses `/fhir/Contract/<guid>/scope`, the route gateway.pdhc already reads.
+    Until 2026-11-18 this called `/internal/contract/<guid>/scope`, which the
+    contract.pdhc.se reverse proxy does not route to the API: the request
+    landed on the frontend, came back 200 HTML, and was treated as
+    "unreachable" — so every ServiceRequest was created fail-open and the
+    request_scope check never ran. Found on the cgm_provider onboarding.
 
     Returns:
         dict with keys: contract_guid, status, scope_defined,
@@ -36,16 +43,11 @@ def fetch_scope(contract_guid):
         logger.warning('CONTRACT_BASE_URL not configured; cannot validate scope')
         return None
 
-    service_key = current_app.config.get('INTERNAL_SERVICE_KEY', '')
-    if not service_key:
-        logger.warning('INTERNAL_SERVICE_KEY not configured; cannot validate scope')
-        return None
-
-    url = f'{base}/internal/contract/{contract_guid}/scope'
+    url = f'{base}/fhir/Contract/{contract_guid}/scope'
     try:
         resp = requests.get(
             url,
-            headers={'X-Service-Key': service_key,
+            headers={'Accept': 'application/json',
                      'X-Source-Service': 'request.pdhc',
                      **outbound_session_headers()},
             timeout=10,
@@ -63,7 +65,13 @@ def fetch_scope(contract_guid):
     try:
         return resp.json()
     except ValueError:
-        logger.warning('contract scope response was not valid JSON')
+        # A 200 that is not JSON is a mis-route (an HTML page from the
+        # proxy), not an outage. Say so loudly: this is how the check was
+        # silently skipped for months.
+        logger.error(
+            'contract scope returned non-JSON (%s) from %s — check the '
+            'reverse-proxy routing on contract.pdhc',
+            resp.headers.get('content-type'), url)
         return None
 
 
