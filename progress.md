@@ -1693,3 +1693,4 @@ re-tag + recreate the worker with the app (#1011).
 
 ## 2026-11-19 — concept scale for gateway OUT_OF_SCALE
 - Transaction map carries scale_min/scale_max = the plan CONCEPT range_low/high (e.g. stress 1-7), not the clinical target range. Gateway drops values outside it (gateway.pdhc same day). +1 test, suite 514.
+- DEPLOYED 2026-11-19 (overlay; rollback tag `:pre_scale`, files `*.pre_scale.<ts>`). Baseline ok, health 200, hashes ok. Verified in production: a4dbcff2 transactions carry their concept scales.
