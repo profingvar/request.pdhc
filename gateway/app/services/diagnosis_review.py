@@ -173,6 +173,9 @@ def build_fhir_resource(sr) -> dict:
         resource['requester']['display'] = sr.requester_user_name
     if sr.based_on_guid:
         resource['basedOn'] = [{'reference': f'ServiceRequest/{sr.based_on_guid}'}]
+    if sr.care_plan_guid:
+        resource.setdefault('basedOn', []).append(
+            {'reference': f'CarePlan/{sr.care_plan_guid}', 'type': 'CarePlan'})
     action = (sr.plan_definition_snapshot or {}).get('action') or {}
     if isinstance(action.get('timingTiming'), dict):
         resource['occurrenceTiming'] = copy.deepcopy(action['timingTiming'])

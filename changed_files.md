@@ -691,3 +691,12 @@ false for 11 files; a hand survey cannot be the gate here.
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_diagnosis_review_984.py (NEW) — 48 tests
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/docs/api.md, docs/architecture.md — endpoints, auth, model
 - /Users/martiningvar/T7_sidewinder/request.pdhc/progress.md, changed_files.md
+
+## 2026-11-19 — ServiceRequest grounded in a shared CarePlan; provider download carries the instantiated plan
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/care_plan_link.py (NEW) — one open CarePlan per (patient, PlanDefinition); backfill
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/service_request_service.py — create attaches the CarePlan (audited)
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/fhir_builder_service.py — basedOn CarePlan/<guid>; Contract -> supportingInfo; contained snapshot names the real plan
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/diagnosis_review.py — child basedOn also names the CarePlan
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/provider_feed_service.py — download: care_plan_guid, care_plan (frozen activities/timing/transaction_guid), is_open
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/__init__.py — flask link-care-plans [--apply]
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_sr_based_on_careplan.py (NEW), /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_provider_download_careplan.py (NEW), /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_diagnosis_review_984.py, /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/conformance_corpus_emit.py + fhir_corpus/

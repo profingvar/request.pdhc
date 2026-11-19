@@ -1671,3 +1671,10 @@ Deploy (operator): migration `e1f2a3b4c5d6` (additive, nullable); `.env` gets
 `ICD11_PDHC_SERVICE_KEY` (same value icd11.pdhc sends; unset = refuses
 everyone) and optionally `ICD11_BASE_URL` (default https://icd11.pdhc.se);
 re-tag + recreate the worker with the app (#1011).
+
+## 2026-11-19 — ServiceRequest -> CarePlan -> PlanDefinition; instantiated plan in the provider download
+- Operator decision: a ServiceRequest is based on the patient's CarePlan, ONE shared per (patient, PlanDefinition). Before: no creation path set care_plan_guid (0 of 21 in production); FHIR basedOn held the Contract (not R5-legal: CarePlan | ServiceRequest | MedicationRequest only).
+- Create reuses the open plan (draft/active/on-hold) or creates one `active` from the order's own frozen snapshot; a completed/revoked plan is not reused. FHIR: basedOn CarePlan/<guid>; Contract moved to supportingInfo (providers read the contract from meta.tag, set by push_service — verified in provider1 and cgm); the CONTAINED CarePlan stays (provider1 and cgm read activities from it) and carries identifier = the real CarePlan guid.
+- Provider request (MMD, contract 93a4aab1…): /provider/download now carries `care_plan_guid`, `care_plan` (the order's FROZEN activities in sort order, FHIR Timing, transaction_guid per concept, ranges, plan version, frozen_at) and `is_open`. Their "status: active" came from the embedded fhir_resource, which is the resource as dispatched; both their example orders are ARCHIVED (d6b81ca3 at 17:22:42, 3ec1555c at 17:27:09).
+- `flask link-care-plans [--apply]` backfills existing orders (dry run default, idempotent).
+- Tests: +6 new (4 fail against the old code — 3 of 4 in the CarePlan file, mutation-checked), diagnosis-review test updated to expect both basedOn entries. Suite 511 passed. Corpus regenerated (seed SR now has a CarePlan).

@@ -129,13 +129,22 @@ def create_service_request(patient_guid, plan_definition_guid, user_guid, org_gu
                   'ips_unavailable': 502}.get(e.code, 409)
         return {'code': e.code, 'message': e.message}, status
 
+    # 2026-11-19: the request is grounded in the patient's CarePlan for this
+    # PlanDefinition (one shared plan per patient+plandef; created if none open).
+    from app.services.care_plan_link import ensure_care_plan
+    snapshot = action_limits.stamp_recommended(plandef_data)
+    care_plan, care_plan_created = ensure_care_plan(
+        patient_guid=patient_guid, plan_definition_guid=plan_definition_guid,
+        snapshot=snapshot, created_by=user_guid)
+
     sr = ServiceRequest(
         status='draft',
+        care_plan_guid=care_plan.guid,
         patient_guid=patient_guid,
         patient_org_guid=patient_org_guid,
         patient_excerpt=patient_excerpt,
         plan_definition_guid=plan_definition_guid,
-        plan_definition_snapshot=action_limits.stamp_recommended(plandef_data),
+        plan_definition_snapshot=snapshot,
         contract_guid=contract_guid,
         requester_user_guid=user_guid,
         requester_user_name=user_name,
@@ -156,7 +165,9 @@ def create_service_request(patient_guid, plan_definition_guid, user_guid, org_gu
                  # recorded so an absent affiliation is visible in the audit
                  # rather than only as a NULL column (#774)
                  'patient_org_guid': patient_org_guid,
-                 'patient_org_resolved': patient_org_guid is not None},
+                 'patient_org_resolved': patient_org_guid is not None,
+                 'care_plan_guid': care_plan.guid,
+                 'care_plan_created': care_plan_created},
         ip_address=ip_address,
     )
 

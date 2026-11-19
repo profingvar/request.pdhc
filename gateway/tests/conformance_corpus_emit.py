@@ -179,6 +179,7 @@ def _seed(app, db) -> str:
             patient_excerpt=PATIENT_EXCERPT,
             plan_definition_guid=PLAN_DEFINITION_GUID,
             plan_definition_snapshot=PLAN_SNAPSHOT,
+            care_plan_guid="00000000-0000-4000-8000-0000000000c9",  # shared CarePlan (2026-11-19)
             contract_guid=CONTRACT_GUID,
             requester_user_guid=REQUESTER_USER_GUID,
             requester_user_name="Dr Test Requester",

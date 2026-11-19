@@ -115,6 +115,15 @@ def _build_careplan(sr_model, snapshot, patient_name, patient_id_ref):
     if snapshot.get('description'):
         careplan['description'] = snapshot['description']
 
+    # The contained CarePlan is the SNAPSHOT a provider executes (provider1
+    # and cgm read their activities from it). It names the real, shared
+    # CarePlan it was taken from, so the two are never mistaken for two plans.
+    if getattr(sr_model, 'care_plan_guid', None):
+        careplan['identifier'] = [{
+            'system': 'https://request.pdhc.se/fhir/CarePlan',
+            'value': sr_model.care_plan_guid,
+        }]
+
     if sr_model.plan_definition_guid:
         careplan['instantiatesCanonical'] = [
             f'https://plan.pdhc.se/api/v1/plandefinitions/{sr_model.plan_definition_guid}'
@@ -395,10 +404,23 @@ def build_service_request_resource(sr_model):
             f'https://plan.pdhc.se/api/v1/plandefinitions/{sr_model.plan_definition_guid}'
         ]
 
-    if sr_model.contract_guid:
+    # 2026-11-19: basedOn is the patient's CarePlan (shared per patient +
+    # PlanDefinition). R5 ServiceRequest.basedOn admits CarePlan |
+    # ServiceRequest | MedicationRequest only, so the Contract -- which sat
+    # here before -- moves to supportingInfo. Providers read the contract from
+    # meta.tag (push_service), so nothing downstream read it from basedOn.
+    if sr_model.care_plan_guid:
         resource['basedOn'] = [{
-            'reference': f'https://contract.pdhc.se/fhir/Contract/{sr_model.contract_guid}',
+            'reference': f'CarePlan/{sr_model.care_plan_guid}',
+            'type': 'CarePlan',
         }]
+    if sr_model.contract_guid:
+        resource['supportingInfo'].append({
+            'reference': {
+                'reference': f'https://contract.pdhc.se/fhir/Contract/{sr_model.contract_guid}',
+                'type': 'Contract',
+            },
+        })
 
     if sr_model.requester_org_guid:
         # Requester organization was previously carried on a custom

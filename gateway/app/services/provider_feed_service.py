@@ -153,7 +153,90 @@ def download_bundle(service_request_guid, provider_org_guid, contract_guid,
         'patient_guid': sr.patient_guid,
         'contract_guid': contract_guid,
         'provider_org_guid': provider_org_guid,
+        # sr_status is the LIVE status and the one to act on. The embedded
+        # fhir_resource is the resource as dispatched, so its `status` is
+        # frozen at dispatch time (an archived request still reads "active"
+        # there). is_open says in one field whether the order still applies.
         'sr_status': sr.status,
+        'is_open': sr.status == 'active',
         'period_start': sr.period_start.isoformat() if sr.period_start else None,
         'period_end': sr.period_end.isoformat() if sr.period_end else None,
+        'care_plan_guid': sr.care_plan_guid,
+        'care_plan': instantiated_care_plan(sr),
     }, 200
+
+
+_UCUM_PERIOD = {'h': 'h', 'd': 'd', 'wk': 'wk', 'mo': 'mo', 'min': 'min'}
+
+
+def _fhir_timing(a):
+    """FHIR Timing from the activity's frozen timing fields, or None."""
+    if a.get('timing_type') != 'repeat':
+        return None
+    rep = {}
+    if a.get('timing_frequency'):
+        rep['frequency'] = int(a['timing_frequency'])
+    if a.get('timing_period'):
+        rep['period'] = a['timing_period']
+    if a.get('timing_period_unit') in _UCUM_PERIOD:
+        rep['periodUnit'] = _UCUM_PERIOD[a['timing_period_unit']]
+    if a.get('timing_bounds_mode') == 'count' and a.get('timing_bounds_count'):
+        rep['count'] = int(a['timing_bounds_count'])
+    elif (a.get('timing_bounds_mode') == 'duration'
+          and a.get('timing_bounds_duration_value')):
+        rep['boundsDuration'] = {
+            'value': a['timing_bounds_duration_value'],
+            'unit': a.get('timing_bounds_duration_unit') or 'mo',
+            'system': 'http://unitsofmeasure.org',
+            'code': a.get('timing_bounds_duration_unit') or 'mo'}
+    if a.get('duration_value') and a.get('duration_unit'):
+        rep['duration'] = a['duration_value']
+        rep['durationUnit'] = a['duration_unit']
+    return {'repeat': rep} if rep else None
+
+
+def instantiated_care_plan(sr):
+    """The plan THIS order instantiates, from the snapshot frozen when the
+    order was created (2026-11-19, asked for by a provider: reading the live
+    template via instantiatesCanonical gives a schedule that may have changed
+    since, while its version string did not).
+
+    The activities, schedules and transaction_guids are the order's own
+    frozen copy. care_plan_guid names the patient's shared CarePlan for this
+    PlanDefinition (one per patient + PlanDefinition); two orders under the
+    same plan may carry different frozen schedules if the template changed
+    between them, and each order's own schedule is the one that applies to it.
+    """
+    snap = sr.plan_definition_snapshot or {}
+    acts = []
+    for a in sorted(snap.get('activities') or [], key=lambda x: x.get('sort_order') or 0):
+        acts.append({
+            'activity_guid': a.get('activity_guid') or a.get('guid'),
+            'title': a.get('title'),
+            'description': a.get('description'),
+            'performer_type': a.get('performer_type'),
+            'timing_type': a.get('timing_type'),
+            'timing': _fhir_timing(a),
+            'transactions': [{
+                'transaction_guid': t.get('transaction_guid') or t.get('guid'),
+                'concept_guid': t.get('concept_guid'),
+                'concept_name': t.get('concept_name'),
+                'unit': t.get('unit') or t.get('concept_unit_name'),
+                'response_type': t.get('response_type'),
+                'requirement_type': t.get('requirement_type'),
+                'range_min': t.get('range_min'),
+                'range_max': t.get('range_max'),
+                'recommended_range_min': t.get('recommended_range_min'),
+                'recommended_range_max': t.get('recommended_range_max'),
+                'action_limit_source': t.get('action_limit_source'),
+            } for t in sorted(a.get('transactions') or [],
+                              key=lambda x: x.get('sort_order') or 0)],
+        })
+    return {
+        'care_plan_guid': sr.care_plan_guid,
+        'plan_definition_guid': sr.plan_definition_guid,
+        'plan_definition_title': snap.get('title'),
+        'plan_definition_version': snap.get('version'),
+        'frozen_at': sr.created_at.isoformat() if sr.created_at else None,
+        'activities': acts,
+    }

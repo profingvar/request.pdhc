@@ -136,7 +136,10 @@ class TestCreation:
         assert fhir['instantiatesCanonical'] == [CANON]
         assert fhir['performerType'] == {'text': 'clinician'}
         assert fhir['subject'] == {'reference': f'Patient/{PATIENT}'}
-        assert fhir['basedOn'] == [{'reference': f'ServiceRequest/{c.based_on_guid}'}]
+        # the order it came from, and (2026-11-19) the shared CarePlan it inherits
+        assert fhir['basedOn'] == [{'reference': f'ServiceRequest/{c.based_on_guid}'},
+                                   {'reference': f'CarePlan/{c.care_plan_guid}', 'type': 'CarePlan'}]
+        assert c.care_plan_guid
         assert fhir['occurrenceTiming'] == DR_ACTION['timingTiming']
 
     def test_work_link_default_and_configurable(self, app, stubs):

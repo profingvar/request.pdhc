@@ -190,6 +190,19 @@ def create_app(testing=False):
     # CLI commands — provider lifecycle (ticket #136)
     _register_provider_cli(app)
 
+    import click
+
+    @app.cli.command('link-care-plans')
+    @click.option('--apply', is_flag=True, help='write; default is a dry run')
+    def link_care_plans_cmd(apply):
+        """2026-11-19: attach every ServiceRequest without a CarePlan to the
+        patient's shared CarePlan for its PlanDefinition (created if none)."""
+        from app.services.care_plan_link import link_existing
+        r = link_existing(apply=apply)
+        click.echo(f"{'APPLIED' if apply else 'DRY RUN'}: {r['requests']} request(s) "
+                   f"in {r['groups']} patient+plandef group(s); plans reused "
+                   f"{r['plans_reused']}, plans created {r['plans_created']}")
+
     @app.cli.command('seed-1177-pat')
     def seed_1177_pat():
         """Issue a push PAT for 1177.pdhc.se webhook delivery."""

@@ -2,7 +2,8 @@
   "authoredOn": "2026-07-01T12:00:00+00:00",
   "basedOn": [
     {
-      "reference": "https://contract.pdhc.se/fhir/Contract/00000000-0000-4000-8000-000000000005"
+      "reference": "CarePlan/00000000-0000-4000-8000-0000000000c9",
+      "type": "CarePlan"
     }
   ],
   "code": {
@@ -121,6 +122,12 @@
         }
       ],
       "id": "careplan-00000000-0000-4000-8000-000000000007",
+      "identifier": [
+        {
+          "system": "https://request.pdhc.se/fhir/CarePlan",
+          "value": "00000000-0000-4000-8000-0000000000c9"
+        }
+      ],
       "instantiatesCanonical": [
         "https://plan.pdhc.se/api/v1/plandefinitions/00000000-0000-4000-8000-000000000002"
       ],
@@ -209,6 +216,12 @@
       "reference": {
         "display": "Contained CarePlan",
         "reference": "#careplan-00000000-0000-4000-8000-000000000007"
+      }
+    },
+    {
+      "reference": {
+        "reference": "https://contract.pdhc.se/fhir/Contract/00000000-0000-4000-8000-000000000005",
+        "type": "Contract"
       }
     },
     {
