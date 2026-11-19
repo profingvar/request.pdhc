@@ -1690,3 +1690,6 @@ re-tag + recreate the worker with the app (#1011).
 - Fix here: the transaction map (what gateway enriches from) keeps a goal only when the goal concept's unit equals the transaction's. CGM mmol/L -> glucose mmol/L unchanged; sleep h, BP mmHg, anxiety/stress (no unit) keep their own concept. Across all SRs 22 of 29 goal links had a different unit. Twin fix in plan.pdhc (the source of the stamping).
 - Test +2 (fails against the old code). Suite 513 passed.
 - DEPLOYED 2026-11-19 (overlay; rollback tag `:pre_goalunit`, files `*.pre_goalunit.<ts>`). Baseline ok, health 200, hashes ok on app + worker. New MMD values after the deploy arrived correctly labelled.
+
+## 2026-11-19 — concept scale for gateway OUT_OF_SCALE
+- Transaction map carries scale_min/scale_max = the plan CONCEPT range_low/high (e.g. stress 1-7), not the clinical target range. Gateway drops values outside it (gateway.pdhc same day). +1 test, suite 514.

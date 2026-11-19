@@ -30,3 +30,13 @@ def test_same_unit_keeps_the_goal():
 def test_another_unit_or_no_unit_drops_the_goal():
     g = _goals()
     assert g["t-sleep"] is None and g["t-sys"] is None and g["t-anx"] is None
+
+
+def test_the_concept_scale_rides_on_the_transaction():
+    """2026-11-19: gateway's OUT_OF_SCALE check needs the concept's scale."""
+    with patch.object(cs, "_plan_concept_units", return_value=UNITS), \
+            patch.object(cs, "_plan_concept_scales", return_value={SYS: (60, 250)}), \
+            patch.object(cs, "_plan_concept_response_types", return_value={}, create=True):
+        t = {x["transaction_guid"]: x for x in cs._extract_transactions(SNAP)}
+    assert (t["t-sys"]["scale_min"], t["t-sys"]["scale_max"]) == (60, 250)
+    assert (t["t-anx"]["scale_min"], t["t-anx"]["scale_max"]) == (None, None)

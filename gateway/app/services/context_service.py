@@ -32,7 +32,7 @@ _GATEWAY_RESPONSE_TYPES = frozenset(
     {'numeric', 'categorical', 'text', 'boolean', 'dateTime', 'graph'}
 )
 
-_plan_cache = {'ts': 0.0, 'rt': {}, 'rt_name': {}, 'unit': {}}
+_plan_cache = {'ts': 0.0, 'rt': {}, 'rt_name': {}, 'unit': {}, 'scale': {}}
 _PLAN_TTL = 300.0
 
 
@@ -88,11 +88,17 @@ def _refresh_plan_maps():
                    for r in _unlist(rt.json())}
         unit_name = {u.get('guid'): (u.get('unit_name') or '')
                      for u in _unlist(un.json())}
-        rt_map, rt_name_map, unit_map = {}, {}, {}
+        rt_map, rt_name_map, unit_map, scale_map = {}, {}, {}, {}
         for c in concepts:
             cg = c.get('guid')
             if not cg:
                 continue
+            # 2026-11-19: the concept's own SCALE (range_low/high) -- what a
+            # value can be at all, e.g. stress 1-7. Not the plan's clinical
+            # target range, which a value is expected to leave sometimes.
+            lo, hi = c.get('range_low'), c.get('range_high')
+            if lo is not None or hi is not None:
+                scale_map[cg] = (lo, hi)
             plan_rt = rt_name.get(c.get('response_type'), '').strip()
             mapped = _PLAN_RT_TO_GATEWAY.get(plan_rt.lower())
             if mapped:
@@ -107,7 +113,7 @@ def _refresh_plan_maps():
                 unit_map[cg] = u
         if rt_map or unit_map or rt_name_map:
             _plan_cache.update(rt=rt_map, rt_name=rt_name_map,
-                               unit=unit_map, ts=now)
+                               unit=unit_map, scale=scale_map, ts=now)
     except (requests.RequestException, ValueError, KeyError, TypeError):
         return  # keep stale maps
 
@@ -120,6 +126,11 @@ def _plan_concept_response_types():
 def _plan_concept_units():
     _refresh_plan_maps()
     return _plan_cache['unit']
+
+
+def _plan_concept_scales():
+    _refresh_plan_maps()
+    return _plan_cache.get('scale') or {}
 
 
 def _plan_concept_response_type_names():
@@ -349,6 +360,7 @@ def _extract_transactions(snapshot):
     fallback_goal_concept_name = top_goals[0].get('concept_name') if len(top_goals) == 1 else None
 
     units = _plan_concept_units()
+    scales = _plan_concept_scales()
     transactions = []
     for activity in snapshot.get('activities', []) or []:
         activity_goal_guid = activity.get('goal_guid') or fallback_goal_guid
@@ -394,6 +406,9 @@ def _extract_transactions(snapshot):
                 'range_min': tx.get('range_min'),
                 'range_max': tx.get('range_max'),
                 'requirement_type': tx.get('requirement_type') or 'required',
+                # The concept's scale, for gateway's OUT_OF_SCALE check.
+                'scale_min': (scales.get(tx.get('concept_guid')) or (None, None))[0],
+                'scale_max': (scales.get(tx.get('concept_guid')) or (None, None))[1],
                 'response_type': _infer_response_type(tx),
                 # #583: plan.pdhc's own name for the answer kind, carried
                 # through so a consumer sees the full concept definition

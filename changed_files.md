@@ -704,3 +704,7 @@ false for 11 files; a hand survey cannot be the gate here.
 ## 2026-11-19 — goal linkage only within the same unit (MMD_plan mislabelling)
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/context_service.py — _extract_transactions drops a goal whose concept unit differs from the transaction's
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_goal_unit_guard.py (NEW)
+
+## 2026-11-19 — concept scale on the transaction map
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/context_service.py — scale_min/scale_max from plan concept range_low/high
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_goal_unit_guard.py
