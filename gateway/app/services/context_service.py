@@ -348,6 +348,7 @@ def _extract_transactions(snapshot):
     fallback_goal_concept = top_goals[0].get('concept_guid') if len(top_goals) == 1 else None
     fallback_goal_concept_name = top_goals[0].get('concept_name') if len(top_goals) == 1 else None
 
+    units = _plan_concept_units()
     transactions = []
     for activity in snapshot.get('activities', []) or []:
         activity_goal_guid = activity.get('goal_guid') or fallback_goal_guid
@@ -363,16 +364,31 @@ def _extract_transactions(snapshot):
                 txn_guid = tx.get('concept_guid')
             if not txn_guid:
                 continue
+            tx_unit = tx.get('unit') or units.get(tx.get('concept_guid'))
+            goal_guid = tx.get('goal_guid') or activity_goal_guid
+            goal_concept = tx.get('goal_concept_guid') or activity_goal_concept
+            goal_concept_name = tx.get('goal_concept_name') or activity_goal_concept_name
+            # 2026-11-19 (MMD_plan): a goal linkage is only trusted when the
+            # goal concept measures in the SAME unit as the transaction.
+            # Gateway labels a value with its goal concept, and MMD_plan
+            # linked its one goal (cgm_mean_glucose, mmol/L) to every
+            # activity -- so sleep (h), blood pressure (mmHg), anxiety and
+            # stress were all stored as glucose. A value is never labelled
+            # with a concept of another unit; the transaction's own concept
+            # is used instead. CGM (mmol/L) -> glucose (mmol/L) is unchanged.
+            if (goal_concept and goal_concept != tx.get('concept_guid')
+                    and (tx_unit or '') != (units.get(goal_concept) or '')):
+                goal_guid = goal_concept = goal_concept_name = None
             transactions.append({
                 'transaction_guid': txn_guid,
                 'concept_guid': tx.get('concept_guid'),
                 'concept_name': tx.get('concept_name', ''),
-                'goal_guid': tx.get('goal_guid') or activity_goal_guid,
-                'goal_concept_guid': tx.get('goal_concept_guid') or activity_goal_concept,
-                'goal_concept_name': tx.get('goal_concept_name') or activity_goal_concept_name,
+                'goal_guid': goal_guid,
+                'goal_concept_guid': goal_concept,
+                'goal_concept_name': goal_concept_name,
                 # unit resolved from plan.pdhc (#559 — snapshot drops it), so the
                 # gateway stamps value_unit; snapshot value wins if it has one.
-                'unit': tx.get('unit') or _plan_concept_units().get(tx.get('concept_guid')),
+                'unit': tx_unit,
                 'unit_display': tx.get('unit_display', ''),
                 'expected_value': tx.get('expected_value'),
                 'range_min': tx.get('range_min'),

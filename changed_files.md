@@ -700,3 +700,7 @@ false for 11 files; a hand survey cannot be the gate here.
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/provider_feed_service.py — download: care_plan_guid, care_plan (frozen activities/timing/transaction_guid), is_open
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/__init__.py — flask link-care-plans [--apply]
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_sr_based_on_careplan.py (NEW), /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_provider_download_careplan.py (NEW), /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_diagnosis_review_984.py, /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/conformance_corpus_emit.py + fhir_corpus/
+
+## 2026-11-19 — goal linkage only within the same unit (MMD_plan mislabelling)
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/context_service.py — _extract_transactions drops a goal whose concept unit differs from the transaction's
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_goal_unit_guard.py (NEW)

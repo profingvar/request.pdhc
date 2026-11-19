@@ -1684,3 +1684,8 @@ re-tag + recreate the worker with the app (#1011).
 - Note: `fhir_resource` in the download is stored at dispatch, so `basedOn CarePlan/…` appears there only for orders dispatched from now on; the top-level `care_plan_guid` / `care_plan` cover every order.
 - Operator declined replacing patient 28a29239…'s real-format personnummer (the only one of 437 in ips).
 - 2026-11-19, operator request "ta bort öppna requests": the one open order, 7dba9449 (MMD_plan, finalised, never dispatched, no contract), REVOKED via revoke_service_request (audited `service_request.revoke`). All 20 care plans had no open order left and were set `completed` (audited `care_plan.complete`, one row each). After: 0 open orders, 0 open care plans. Dump first: `~/backups/predeploy/request.pdhc/pre_revoke_close_*.pgdump` (verified).
+
+## 2026-11-19 — MMD values all stored as cgm_mean_glucose
+- MMD sent 7 values with correct, distinct transaction_guids; cdr1 stored them all under concept d83a8dac (cgm_mean_glucose). Cause: plan.pdhc stamps a plan's single goal on EVERY activity/transaction, and gateway labels a value with its goal concept. Verified in gateway's cdr_delivery_log (concept per transaction) and the frozen snapshot of a4dbcff2.
+- Fix here: the transaction map (what gateway enriches from) keeps a goal only when the goal concept's unit equals the transaction's. CGM mmol/L -> glucose mmol/L unchanged; sleep h, BP mmHg, anxiety/stress (no unit) keep their own concept. Across all SRs 22 of 29 goal links had a different unit. Twin fix in plan.pdhc (the source of the stamping).
+- Test +2 (fails against the old code). Suite 513 passed.
