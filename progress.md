@@ -10,7 +10,7 @@ This document tracks progress after each step in the deployment plan (`readme.md
 - The order plan editor (edit_plan.html) rebuilt each measurement from its form fields only, so saving a draft order's plan lost `transaction_guid` (gateway's link from a delivered value to the measurement; also the key action-limit provenance matches on), plus unit and response type. Measured: no damage yet, 0 of 48 measurements across all 8 orders lack it.
 - Editor: keeps each measurement as loaded and overlays the edited fields; a changed concept starts clean. Driven in jsdom.
 - Server (`action_limits.restore_transaction_guids`, run by `merge_edit`): restores a dropped key when unambiguous (same activity, same concept, exactly one stored measurement of it); never overwrites a key the edit kept.
-- tests/test_edit_keeps_transaction_guid.py (6, mutation-checked). Suite 531 passed. Not deployed.
+- tests/test_edit_keeps_transaction_guid.py (6, mutation-checked). Suite 531 passed. Deployed 2026-11-20 (app container; image tag `request-app:pre_txguid`): health 200, hash ok, smoke request 8/8, gateway 9/9, cgm 8/8 before/after.
 
 ### 2026-11-20 — continuous activities (CGM)
 - plan.pdhc gained timing_type 'continuous' (ef7c737): ordered once, required active period (duration bound), expected interval between values (`sample_interval_value/unit`). The snapshot carries the fields straight from plan's API.
