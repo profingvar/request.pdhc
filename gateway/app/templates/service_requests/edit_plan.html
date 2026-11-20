@@ -281,8 +281,15 @@ function addAction(data) {
   div.className = 'item-row';
   div.dataset.actionIdx = idx;
   div.dataset.actGuid = data.guid || '';
+  // 2026-11-20: keep the activity as loaded, so a save does not drop fields
+  // this form does not edit (the end bound, a continuous activity's period
+  // and interval). collectActions() overlays the edited fields on it.
+  div.dataset.orig = JSON.stringify(data);
 
   const timingType = data.timing_type || '';
+  const ctNote = timingType === 'continuous'
+    ? `<p class="ct-note" style="margin:0.25rem 0 0.5rem;color:var(--text-muted);">Continuous: ordered once, runs ${data.timing_bounds_duration_value || '?'} ${({d:'days',wk:'weeks',mo:'months'})[data.timing_bounds_duration_unit] || ''}, a value about every ${data.sample_interval_value || '?'} ${data.sample_interval_unit || ''}. Change the period and interval in plan.pdhc.</p>`
+    : '';
 
   div.innerHTML = `
     <button type="button" class="remove-btn" onclick="this.parentElement.remove(); updatePreview();">&times;</button>
@@ -314,7 +321,9 @@ function addAction(data) {
           <option value="">None</option>
           <option value="once" ${timingType === 'once' ? 'selected' : ''}>Once</option>
           <option value="repeat" ${timingType === 'repeat' ? 'selected' : ''}>Repeat</option>
+          ${timingType === 'continuous' ? `<option value="continuous" selected>Continuous</option>` : ''}
         </select>
+        ${ctNote}
       </div>
       <div class="form-group">
         <label>Duration of activity</label>
@@ -412,7 +421,9 @@ function addTransaction(actionRow, actionIdx, data) {
 function collectActions() {
   const actions = [];
   document.querySelectorAll('#actionsContainer .item-row').forEach(row => {
-    const act = {
+    let orig = {};
+    try { orig = JSON.parse(row.dataset.orig || '{}'); } catch (e) { orig = {}; }
+    const act = Object.assign({}, orig, {
       id: row.dataset.actGuid || undefined,
       title: row.querySelector('.action-title')?.value || '',
       description: row.querySelector('.action-desc')?.value || null,
@@ -424,7 +435,17 @@ function collectActions() {
       timing_period: row.querySelector('.action-timing-period')?.value ? parseFloat(row.querySelector('.action-timing-period').value) : null,
       timing_period_unit: row.querySelector('.action-timing-unit')?.value || null,
       transactions: [],
-    };
+    });
+    if (act.timing_type === 'continuous') {
+      // ordered once: the repeat fields mean nothing here (see plan.pdhc)
+      act.timing_frequency = null; act.timing_period = null; act.timing_period_unit = null;
+      act.duration_value = null; act.duration_unit = null; act.timing_bounds_count = null;
+    } else if (orig.timing_type === 'continuous') {
+      // switched away from continuous: drop its period and interval
+      act.timing_bounds_mode = null; act.timing_bounds_duration_value = null;
+      act.timing_bounds_duration_unit = null;
+      act.sample_interval_value = null; act.sample_interval_unit = null;
+    }
 
     row.querySelectorAll('.txn-row').forEach(txnRow => {
       const conceptSel = txnRow.querySelector('.txn-concept');

@@ -6,6 +6,13 @@ This document tracks progress after each step in the deployment plan (`readme.md
 
 ## 1) Environment and infrastructure setup
 
+### 2026-11-20 — continuous activities (CGM)
+- plan.pdhc gained timing_type 'continuous' (ef7c737): ordered once, required active period (duration bound), expected interval between values (`sample_interval_value/unit`). The snapshot carries the fields straight from plan's API.
+- Timeline: one line Start -> End for a continuous activity (40 d at 15 min would otherwise be 3,840 stations); cadence "Continuous, about every 15 min"; truncated past the window; the order's own end date still wins.
+- Provider feed: `timing` = `{repeat: {count: 1, duration, durationUnit}}`, plus `expected_sampling_interval` (UCUM duration); never a frequency.
+- Order plan editor (edit_plan.html): keeps the activity as loaded and overlays the edited fields, so a save no longer drops what the form does not edit. That also fixes an existing loss: `timing_bounds_*` ("ends after N") was dropped on every save. Continuous is shown with a read-only note (period and interval are edited in plan.pdhc). Driven in jsdom.
+- tests/test_continuous_activity.py (6, both branches mutation-checked). Suite 525 passed. Not deployed.
+
 ### 2026-11-20 — SR context carries the patient's gender from ips
 - `_resolve_patient_demographics` returns (name, birth_date, gender); `patient_gender` is added to the context beside name and birth date, only for FHIR AdministrativeGender values.
 - Why: gateway rewrites cdr1's Patient from this context; without gender every sync erased the sex (Andrea Lindqvist, version 2).

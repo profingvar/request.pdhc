@@ -171,6 +171,15 @@ _UCUM_PERIOD = {'h': 'h', 'd': 'd', 'wk': 'wk', 'mo': 'mo', 'min': 'min'}
 
 def _fhir_timing(a):
     """FHIR Timing from the activity's frozen timing fields, or None."""
+    if a.get('timing_type') == 'continuous':
+        # 2026-11-20: ordered ONCE, lasting the active period (plan.pdhc's
+        # export uses the same Timing). The stream's interval is sent as
+        # `expected_sampling_interval`, never as a frequency, so a provider
+        # does not read 3,840 orders into a CGM.
+        v, u = a.get('timing_bounds_duration_value'), a.get('timing_bounds_duration_unit')
+        if not v or u not in _UCUM_PERIOD:
+            return None
+        return {'repeat': {'count': 1, 'duration': v, 'durationUnit': _UCUM_PERIOD[u]}}
     if a.get('timing_type') != 'repeat':
         return None
     rep = {}
@@ -217,6 +226,11 @@ def instantiated_care_plan(sr):
             'performer_type': a.get('performer_type'),
             'timing_type': a.get('timing_type'),
             'timing': _fhir_timing(a),
+            'expected_sampling_interval': (
+                {'value': a['sample_interval_value'], 'unit': a.get('sample_interval_unit'),
+                 'system': 'http://unitsofmeasure.org', 'code': a.get('sample_interval_unit')}
+                if a.get('timing_type') == 'continuous' and a.get('sample_interval_value')
+                else None),
             'transactions': [{
                 'transaction_guid': t.get('transaction_guid') or t.get('guid'),
                 'concept_guid': t.get('concept_guid'),

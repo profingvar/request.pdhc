@@ -116,6 +116,45 @@ def _bound_end_day(activity, anchor, hard_end, step):
     return min(ends) if ends else None
 
 
+_INTERVAL_WORD = {'s': 's', 'min': 'min', 'h': 'h'}
+
+
+def _continuous_line(i, act, anchor, hard_end, window_days):
+    """A continuous activity (2026-11-20, e.g. CGM): ordered ONCE, runs for
+    its active period and streams values meanwhile. Drawn as one line from a
+    start station to an end station -- never as one station per value, which
+    for 40 days at 15 min would be 3,840 stations."""
+    bound_end = _bound_end_day(act, anchor, hard_end, 1)
+    end = bound_end if bound_end is not None else 0
+    iv, iu = act.get('sample_interval_value'), act.get('sample_interval_unit')
+    cadence = 'Continuous'
+    if _num(iv, 0):
+        cadence += f', about every {_num(iv, 0)} {_INTERVAL_WORD.get(iu, iu or "")}'.rstrip()
+    shown_end = min(end, window_days)
+    stations = [{'ordinal': 1, 'day': 0, 'date': anchor.isoformat(),
+                 'label': 'Start', 'terminus': end == 0}]
+    if end > 0:
+        stations.append({'ordinal': 2, 'day': shown_end,
+                         'date': (anchor + timedelta(days=shown_end)).isoformat(),
+                         'label': 'End' if end <= window_days else '…',
+                         'terminus': end <= window_days})
+    return {
+        'index': i,
+        'title': act.get('title') or f'Activity {i + 1}',
+        'description': act.get('description') or '',
+        'color': _LINE_COLORS[i % len(_LINE_COLORS)],
+        'cadence': cadence,
+        'concepts': _concepts_for(act),
+        'continuous': True,
+        'endless': False,
+        'truncated': end > window_days,
+        'bound_end_day': bound_end,
+        'bound_end_date': ((anchor + timedelta(days=bound_end)).isoformat()
+                           if bound_end is not None else None),
+        'stations': stations,
+    }
+
+
 def build_timeline(activities, start_date=None, end_date=None,
                    window_days=WINDOW_DAYS):
     """Compute the metro-map model for a set of PlanDefinition activities.
@@ -143,6 +182,11 @@ def build_timeline(activities, start_date=None, end_date=None,
     lines = []
     max_last_day = 0
     for i, act in enumerate(activities or []):
+        if act.get('timing_type') == 'continuous':
+            line = _continuous_line(i, act, anchor, hard_end, window_days)
+            lines.append(line)
+            max_last_day = max(max_last_day, *(s['day'] for s in line['stations']))
+            continue
         unit = str(act.get('timing_period_unit') or 'd').lower()
         period = _num(act.get('timing_period'), 1)
         step = max(1, int(round((period or 1) * _unit_days(unit))))
