@@ -6,6 +6,10 @@ This document tracks progress after each step in the deployment plan (`readme.md
 
 ## 1) Environment and infrastructure setup
 
+### 2026-11-20 — SR context carries care_plan_guid
+- `/internal/service-request/<guid>/context` now returns `care_plan_guid` (ServiceRequest.care_plan_guid, None when absent). gateway forwards it to the CDR; 0 of 34 gateway observations in cdr1 had one.
+- tests/test_context_care_plan.py (2; mutation-checked). Suite 516 passed. Not yet deployed.
+
 ### 1.1 Prerequisites (1.a–1.d) — DONE
 
 - Docker Compose v5.1.0 — available

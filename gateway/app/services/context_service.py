@@ -273,6 +273,10 @@ def get_sr_context(sr_guid):
         # Same reason gateway's cdr_forwarder uses it for author_org_guid.
         'patient_org_guid': getattr(sr, 'patient_org_guid', None),
         'plan_definition_guid': sr.plan_definition_guid,
+        # 2026-11-20: the CarePlan the request is based on (care_plan_link).
+        # gateway forwards it to the CDR's clinical_context; until now 0 of
+        # the observations gateway delivered to cdr1 carried one.
+        'care_plan_guid': getattr(sr, 'care_plan_guid', None),
         'period_start': sr.period_start.isoformat() if sr.period_start else None,
         'period_end': sr.period_end.isoformat() if sr.period_end else None,
         'transactions': transactions,
