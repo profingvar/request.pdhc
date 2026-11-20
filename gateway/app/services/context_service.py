@@ -214,22 +214,33 @@ def _human_name(fhir_patient):
     return full or None
 
 
+#: FHIR AdministrativeGender. Anything else from ips is not passed on.
+_GENDERS = ('male', 'female', 'other', 'unknown')
+
+
 def _resolve_patient_demographics(patient_guid):
-    """(name, birth_date) for a patient, resolved from ips — the registry of
-    record. Fail-soft: any error / not-found / missing name returns (None, None)
-    so the SR context is never blocked and unregistered patients (e.g. an
-    external provider's patient that was never registered) stay pseudonymous."""
+    """(name, birth_date, gender) for a patient, resolved from ips — the
+    registry of record. Fail-soft: any error / not-found returns
+    (None, None, None) so the SR context is never blocked and unregistered
+    patients (e.g. an external provider's patient that was never registered)
+    stay pseudonymous.
+
+    2026-11-20: gender added. gateway rewrote cdr1's Patient from this context
+    without it, so every sync dropped the patient's sex and the federated
+    analysis reported it missing."""
     if not patient_guid:
-        return None, None
+        return None, None, None
     try:
         body, status = patient_service.get_patient(patient_guid)
         if status != 200 or not isinstance(body, dict):
-            return None, None
-        return _human_name(body), (body.get('birthDate') or None)
+            return None, None, None
+        gender = str(body.get('gender') or '').strip().lower()
+        return (_human_name(body), (body.get('birthDate') or None),
+                gender if gender in _GENDERS else None)
     except Exception as exc:  # noqa: BLE001 — demographics are best-effort
         logger.warning('ips demographics lookup failed for %s: %s',
                        str(patient_guid)[:12], exc)
-        return None, None
+        return None, None, None
 
 
 def get_sr_context(sr_guid):
@@ -249,7 +260,8 @@ def get_sr_context(sr_guid):
     # Patient demographics from ips (registry of record). gateway uses these to
     # populate CDR1's patient row so care-delivery dashboards show a name.
     # Fail-soft: absent keys keep the patient pseudonymous downstream.
-    patient_name, patient_birth_date = _resolve_patient_demographics(sr.patient_guid)
+    patient_name, patient_birth_date, patient_gender = \
+        _resolve_patient_demographics(sr.patient_guid)
 
     context = {
         'service_request_guid': sr.guid,
@@ -288,6 +300,8 @@ def get_sr_context(sr_guid):
         context['patient_name'] = patient_name
         if patient_birth_date:
             context['patient_birth_date'] = patient_birth_date
+        if patient_gender:
+            context['patient_gender'] = patient_gender
     return context
 
 

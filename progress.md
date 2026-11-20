@@ -6,6 +6,11 @@ This document tracks progress after each step in the deployment plan (`readme.md
 
 ## 1) Environment and infrastructure setup
 
+### 2026-11-20 — SR context carries the patient's gender from ips
+- `_resolve_patient_demographics` returns (name, birth_date, gender); `patient_gender` is added to the context beside name and birth date, only for FHIR AdministrativeGender values.
+- Why: gateway rewrites cdr1's Patient from this context; without gender every sync erased the sex (Andrea Lindqvist, version 2).
+- 3 tests in tests/test_context_demographics.py (mutation-checked). Suite 519 passed. Not yet deployed.
+
 ### 2026-11-20 — SR context carries care_plan_guid
 - `/internal/service-request/<guid>/context` now returns `care_plan_guid` (ServiceRequest.care_plan_guid, None when absent). gateway forwards it to the CDR; 0 of 34 gateway observations in cdr1 had one.
 - tests/test_context_care_plan.py (2; mutation-checked). Suite 516 passed. Deployed 2026-11-20 (overlay, rollback tag :pre_careplan); smokes request/gateway/cdr1/ips green.

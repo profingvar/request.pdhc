@@ -67,3 +67,21 @@ def test_failsoft_when_lookup_raises():
         SR.query.filter_by.return_value.first.return_value = _fake_sr()
         ctx = cs.get_sr_context('sr-1')
     assert 'patient_name' not in ctx
+
+
+# 2026-11-20 — gender travels with name and birth date. gateway rewrites cdr1's
+# Patient from this context; without gender every sync dropped the sex.
+
+def test_gender_added_from_ips():
+    ctx = _run({'name': [{'text': 'A B'}], 'birthDate': '2002-07-25',
+                'gender': 'female'}, 200)
+    assert ctx['patient_gender'] == 'female'
+
+
+def test_a_gender_outside_administrative_gender_is_not_passed_on():
+    ctx = _run({'name': [{'text': 'A B'}], 'gender': 'F'}, 200)
+    assert 'patient_gender' not in ctx
+
+
+def test_no_gender_on_404():
+    assert 'patient_gender' not in _run({}, 404)
