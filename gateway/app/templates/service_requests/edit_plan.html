@@ -381,6 +381,9 @@ function addTransaction(actionRow, actionIdx, data) {
   const container = actionRow.querySelector('.txn-container');
   const div = document.createElement('div');
   div.className = 'txn-row';
+  // 2026-11-20: keep the measurement as loaded (transaction_guid above all:
+  // it is how gateway links a delivered value to this order's measurement).
+  div.dataset.orig = JSON.stringify(data);
 
   div.innerHTML = `
     <button type="button" class="remove-btn" onclick="this.parentElement.remove(); updatePreview();">&times;</button>
@@ -450,14 +453,19 @@ function collectActions() {
     row.querySelectorAll('.txn-row').forEach(txnRow => {
       const conceptSel = txnRow.querySelector('.txn-concept');
       const concept = CONCEPTS.find(c => c.guid === conceptSel?.value);
-      const txn = {
+      let tOrig = {};
+      try { tOrig = JSON.parse(txnRow.dataset.orig || '{}'); } catch (e) { tOrig = {}; }
+      // A different concept is a different measurement: nothing of the old
+      // one (its transaction_guid, unit, response type) carries over.
+      if ((tOrig.concept_guid || null) !== (conceptSel?.value || null)) tOrig = {};
+      const txn = Object.assign({}, tOrig, {
         concept_guid: conceptSel?.value || null,
         concept_name: concept ? concept.concept_name : null,
         requirement_type: txnRow.querySelector('.txn-requirement')?.value || null,
         expected_value: txnRow.querySelector('.txn-expected')?.value || null,
         range_min: txnRow.querySelector('.txn-range-min')?.value ? parseFloat(txnRow.querySelector('.txn-range-min').value) : null,
         range_max: txnRow.querySelector('.txn-range-max')?.value ? parseFloat(txnRow.querySelector('.txn-range-max').value) : null,
-      };
+      });
       act.transactions.push(txn);
     });
 

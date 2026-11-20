@@ -79,6 +79,42 @@ def _check(tx):
         raise InvalidActionLimit(f"action limit {lo}..{hi} for {tx.get('concept_name') or _key(tx)} needs min < max")
 
 
+def _act_key(act):
+    return act.get("activity_guid") or act.get("guid") or act.get("id")
+
+
+def restore_transaction_guids(stored, edited):
+    """Give back a measurement's transaction_guid that an edit dropped
+    (2026-11-20). The order plan editor rebuilt each measurement from its form
+    fields only, so a save lost transaction_guid -- the key gateway uses to
+    link a delivered value to this order's measurement, and the key the
+    action-limit provenance below is matched on.
+
+    Restored only when unambiguous: same activity, same concept, and exactly
+    one stored measurement of that concept there. A changed concept is a new
+    measurement and gets nothing. Mutates ``edited``; returns the count.
+    """
+    if not isinstance(stored, dict) or not isinstance(edited, dict):
+        return 0
+    by_act = {}
+    for act in stored.get("activities") or []:
+        if isinstance(act, dict) and _act_key(act):
+            by_act[_act_key(act)] = [t for t in act.get("transactions") or [] if isinstance(t, dict)]
+    n = 0
+    for act in edited.get("activities") or []:
+        if not isinstance(act, dict):
+            continue
+        olds = by_act.get(_act_key(act)) or []
+        for tx in act.get("transactions") or []:
+            if not isinstance(tx, dict) or _key(tx) or not tx.get("concept_guid"):
+                continue
+            same = [o for o in olds if o.get("concept_guid") == tx["concept_guid"] and _key(o)]
+            if len(same) == 1:
+                tx["transaction_guid"] = _key(same[0])
+                n += 1
+    return n
+
+
 def merge_edit(stored, edited):
     """The requester's edit, with server-owned provenance restored.
 
@@ -86,6 +122,7 @@ def merge_edit(stored, edited):
     limit that differs from the STORED one.
     """
     out = copy.deepcopy(edited)
+    restore_transaction_guids(stored, out)
     before = {_key(tx): tx for tx in _transactions(stored) if _key(tx)}
     changes = []
     for tx in _transactions(out):
