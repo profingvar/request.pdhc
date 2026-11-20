@@ -11,7 +11,7 @@ This document tracks progress after each step in the deployment plan (`readme.md
 - Timeline: one line Start -> End for a continuous activity (40 d at 15 min would otherwise be 3,840 stations); cadence "Continuous, about every 15 min"; truncated past the window; the order's own end date still wins.
 - Provider feed: `timing` = `{repeat: {count: 1, duration, durationUnit}}`, plus `expected_sampling_interval` (UCUM duration); never a frequency.
 - Order plan editor (edit_plan.html): keeps the activity as loaded and overlays the edited fields, so a save no longer drops what the form does not edit. That also fixes an existing loss: `timing_bounds_*` ("ends after N") was dropped on every save. Continuous is shown with a read-only note (period and interval are edited in plan.pdhc). Driven in jsdom.
-- tests/test_continuous_activity.py (6, both branches mutation-checked). Suite 525 passed. Not deployed.
+- tests/test_continuous_activity.py (6, both branches mutation-checked). Suite 525 passed. Deployed 2026-11-20 (app container only; the worker serves neither feed nor timeline; image tag `request-app:pre_continuous`): health 200, hash ok, smoke request 8/8, gateway 9/9, plan 10/10, cgm 8/8 after.
 
 ### 2026-11-20 — SR context carries the patient's gender from ips
 - `_resolve_patient_demographics` returns (name, birth_date, gender); `patient_gender` is added to the context beside name and birth date, only for FHIR AdministrativeGender values.
