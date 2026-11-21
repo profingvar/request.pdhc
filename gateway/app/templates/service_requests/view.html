@@ -303,7 +303,7 @@
             <td><strong>Patient</strong></td>
             <td>{{ subj.get('display', '') }}</td>
             <td style="font-size:0.75rem;">{{ patient_id }}</td>
-            <td><a href="https://ips.pdhc.se/admin/patients/{{ patient_id }}" target="_blank" class="btn btn-sm btn-secondary" style="padding:0.1rem 0.4rem; font-size:0.75rem;">IPS</a></td>
+            <td>{% if eps_admin_base and patient_id %}<a href="{{ eps_admin_base }}/admin/patients/{{ patient_id }}" target="_blank" rel="noopener" class="btn btn-sm btn-secondary" style="padding:0.1rem 0.4rem; font-size:0.75rem;">EPS</a>{% endif %}</td>
           </tr>
           {# Requester / Practitioner #}
           {% set req = fhir.get('requester', {}) %}

@@ -474,7 +474,10 @@ def view_detail(guid):
                            diagnosis_reviews=diagnosis_reviews,
                            receipts=receipts, sr_forms=sr_forms, available_forms=available_forms,
                            contract_name=contract_name, contract_names=contract_names,
-                           eligible_providers=eligible)
+                           eligible_providers=eligible,
+                           # #1023: the patient link follows the configured EPS address
+                           # (EPS_BASE_URL, falling back to IPS_BASE_URL), never a literal host.
+                           eps_admin_base=(current_app.config.get('IPS_BASE_URL') or '').rstrip('/'))
 
 
 def _timeline_lines_for_js(tl):
