@@ -2,7 +2,7 @@
 
 This document is the authoritative deployment plan for the `request.pdhc` unified service. It covers every step from environment setup through a fully operational orchestrating service that combines patient lifecycle, CarePlan readout/parse/export, and CarePlan dispatch — all under one functionally coherent contract. Numbering follows the `1.a, 1.b` convention required by Rule 3.
 
-`request.pdhc` is an **orchestrating dispatch service** that proxies to live backends (`ips.pdhc.se` for Patient/IPS data, `plan.pdhc.se` for CarePlan/PlanDef data, `sso.pdhc.se` for authentication) and maintains its own local PostgreSQL for dispatch receipts, audit logs, and workflow state.
+`request.pdhc` is an **orchestrating dispatch service** that proxies to live backends (`eps.pdhc.se`, formerly `ips.pdhc.se`, for Patient/IPS data, `plan.pdhc.se` for CarePlan/PlanDef data, `sso.pdhc.se` for authentication) and maintains its own local PostgreSQL for dispatch receipts, audit logs, and workflow state.
 
 **Scope note (2026-07-02):** alerting — threshold evaluation on incoming Observations and `DetectedIssue`/`Flag` emission — is **out of scope** for this service by design. The alerting layer belongs in analyse.pdhc; request.pdhc is a dispatch envelope, not an MDR Rule 11 device. See [`docs/decisions/ADR-001-alerting-scope.md`](docs/decisions/ADR-001-alerting-scope.md).
 
@@ -79,7 +79,7 @@ request.pdhc/
     │   ├── services/
     │   │   ├── __init__.py
     │   │   ├── auth_service.py           # SSO token validation, access blob
-    │   │   ├── patient_service.py        # proxy to ips.pdhc.se
+    │   │   ├── patient_service.py        # proxy to eps.pdhc.se (was ips.pdhc.se)
     │   │   ├── careplan_service.py       # proxy to plan.pdhc.se
     │   │   ├── parse_service.py          # CarePlan → normalized transactions
     │   │   ├── csv_service.py            # transaction rows → CSV
@@ -187,7 +187,7 @@ FLASK_ENV=development
 FLASK_PORT=9060
 
 # Upstream service URLs
-IPS_BASE_URL=https://ips.pdhc.se
+EPS_BASE_URL=https://eps.pdhc.se   # IPS_BASE_URL still read as deprecated fallback (#1023)
 PLAN_BASE_URL=https://plan.pdhc.se
 SSO_BASE_URL=https://sso.pdhc.se
 
@@ -271,7 +271,7 @@ pytest-cov>=4.1
 - **3.e** Implement `gateway/app/config.py`:
   - `DATABASE_URL` from env.
   - `SECRET_KEY`, `JWT_SECRET_KEY` from env.
-  - `IPS_BASE_URL`, `PLAN_BASE_URL`, `SSO_BASE_URL` from env.
+  - `EPS_BASE_URL` (fallback `IPS_BASE_URL`, #1023), `PLAN_BASE_URL`, `SSO_BASE_URL` from env.
   - `FLASK_ENV`, debug flag.
 
 ### 3.3 Database migrations
@@ -844,7 +844,7 @@ Kill targets before startup: ports 9060–9063 (previous run).
 | Service       | URL                      | Purpose                          |
 |---------------|--------------------------|----------------------------------|
 | SSO           | `https://sso.pdhc.se`    | Authentication, access blobs     |
-| IPS           | `https://ips.pdhc.se`    | Patient/IPS data (FHIR R5)      |
+| EPS (was IPS) | `https://eps.pdhc.se`    | Patient/IPS data (FHIR R5)      |
 | Plan          | `https://plan.pdhc.se`   | PlanDefinitions, Form catalogue, FHIR Questionnaire production, render-ready JSON |
 | Contract      | `https://contract.pdhc.se` | Provider contracts for matching |
 

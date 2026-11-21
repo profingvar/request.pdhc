@@ -28,7 +28,7 @@ It does **not** own:
 - **Identity** (sso.pdhc).
 - **The patient registry** — patients live in **ips.pdhc**. request.pdhc holds
   **no `Patient` table**; it *proxies* IPS via `patient_service.py`
-  (`IPS_BASE_URL`) and stores only a JSON `patient_excerpt` snapshot on the SR.
+  (`EPS_BASE_URL`, fallback `IPS_BASE_URL`) and stores only a JSON `patient_excerpt` snapshot on the SR.
 - **Contract terms** (contract.pdhc).
 - **PlanDefinition / CarePlan templates authoring** (plan.pdhc — request.pdhc
   snapshots them).
@@ -65,7 +65,7 @@ Three containers in the `request` compose project (`docker-compose.yml`):
   unless-stopped`, depends on both `db` (healthy) and `app` (healthy).
 
 All cross-service HTTP uses the `*_BASE_URL` config values
-(`IPS_BASE_URL`, `PLAN_BASE_URL`, `CONTRACT_BASE_URL`, `SSO_BASE_URL`); on the
+(`EPS_BASE_URL` with `IPS_BASE_URL` as deprecated fallback, `PLAN_BASE_URL`, `CONTRACT_BASE_URL`, `SSO_BASE_URL`); on the
 macmini these resolve through nginx / `host.docker.internal`.
 
 ## 3) Data flow — happy path

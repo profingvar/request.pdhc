@@ -40,7 +40,7 @@ insecure default** — the compose file refuses to start without it, #369):
 | `SSO_BASE_URL` | `https://sso.pdhc.se` |
 | `SSO_CLIENT_ID` / `SSO_CLIENT_SECRET` | matched pair issued by sso.pdhc |
 | `SSO_CALLBACK_URL` | `https://request.pdhc.se/api/v1/auth/callback` |
-| `IPS_BASE_URL` / `IPS_API_KEY` | patient proxy **and** consent-at-dispatch source |
+| `EPS_BASE_URL` / `EPS_API_KEY` | `https://eps.pdhc.se`; patient proxy, validate-identifier **and** consent-at-dispatch source. `IPS_BASE_URL` / `IPS_API_KEY` are the deprecated fallback, read only when the EPS name is empty (#1023) |
 | `PLAN_BASE_URL` | PlanDefinition snapshot + dispatch |
 | `CONTRACT_BASE_URL` | contract status + PAT auto-provision |
 | `INTERNAL_SERVICE_KEY` | `X-Service-Key` gateway.pdhc presents to `/internal/*` |

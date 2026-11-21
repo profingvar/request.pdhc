@@ -708,3 +708,11 @@ false for 11 files; a hand survey cannot be the gate here.
 ## 2026-11-19 — concept scale on the transaction map
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/services/context_service.py — scale_min/scale_max from plan concept range_low/high
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_goal_unit_guard.py
+
+## 2026-11-21 — #1023 EPS rename phase 3: EPS_* first, IPS_* as fallback
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/app/config.py — `_eps_env()`; IPS_BASE_URL / IPS_API_KEY config keys now read EPS_* first; code default URL https://eps.pdhc.se
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/tests/test_eps_env.py (NEW)
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/.env.example — EPS_*; IPS_* marked deprecated fallback
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/docs/operator-manual.md
+- /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/docs/architecture.md
+- /Users/martiningvar/T7_sidewinder/request.pdhc/readme.md

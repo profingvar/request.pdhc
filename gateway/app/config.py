@@ -31,6 +31,24 @@ def _session_cookie_secure(production: bool) -> bool:
     return production
 
 
+def _eps_env(name: str, default: str = '') -> str:
+    """#1023 (epic #1015): ips.pdhc is becoming eps.pdhc. Read EPS_<name>
+    first and fall back to the deprecated IPS_<name>, so a deployment that
+    carries only the old name behaves exactly as before.
+
+    An EMPTY EPS_<name> counts as unset and falls through to IPS_<name>.
+    The IPS_ branch is os.environ.get unchanged: an empty IPS_<name> still
+    reads as empty, and both absent gives `default` — the same value the
+    old single read gave. No new default is invented here (#833).
+
+    The config KEYS stay IPS_BASE_URL / IPS_API_KEY; only the environment
+    names change. The IPS_ fallback is removed in phase 4 of #1015."""
+    new = os.environ.get(f'EPS_{name}')
+    if new:
+        return new
+    return os.environ.get(f'IPS_{name}', default)
+
+
 class Config:
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL', '')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
@@ -68,8 +86,9 @@ class Config:
     SESSION_COOKIE_SAMESITE = 'Lax'
 
     # Upstream service URLs
-    IPS_BASE_URL = os.environ.get('IPS_BASE_URL', 'https://ips.pdhc.se')
-    IPS_API_KEY = os.environ.get('IPS_API_KEY', '')
+    # EPS_BASE_URL / EPS_API_KEY, with IPS_* as the deprecated fallback (#1023).
+    IPS_BASE_URL = _eps_env('BASE_URL', 'https://eps.pdhc.se')
+    IPS_API_KEY = _eps_env('API_KEY', '')
     PLAN_BASE_URL = os.environ.get('PLAN_BASE_URL', 'https://plan.pdhc.se')
     PLAN_API_KEY = os.environ.get('PLAN_API_KEY', '')
     # #931: read_only service key plan.pdhc issues to this service. Unset =
