@@ -26,8 +26,8 @@ provider needs to report back. It owns:
 It does **not** own:
 
 - **Identity** (sso.pdhc).
-- **The patient registry** — patients live in **ips.pdhc**. request.pdhc holds
-  **no `Patient` table**; it *proxies* IPS via `patient_service.py`
+- **The patient registry** — patients live in **eps.pdhc** (formerly ips.pdhc). request.pdhc holds
+  **no `Patient` table**; it *proxies* EPS via `patient_service.py`
   (`EPS_BASE_URL`, fallback `IPS_BASE_URL`) and stores only a JSON `patient_excerpt` snapshot on the SR.
 - **Contract terms** (contract.pdhc).
 - **PlanDefinition / CarePlan templates authoring** (plan.pdhc — request.pdhc
@@ -112,9 +112,9 @@ of truth (Rule 18). Verified against the model files under `app/models/`.
 
 ### 4.1 There is no Patient table
 
-Patients live in **ips.pdhc**. `app/services/patient_service.py` proxies
-`GET/POST/PUT/DELETE {IPS_BASE_URL}/fhir/Patient[...]` and
-`{IPS_BASE_URL}/api/v1/patients/<guid>/clinics` (need-to-know check). The only
+Patients live in **eps.pdhc** (formerly ips.pdhc). `app/services/patient_service.py` proxies
+`GET/POST/PUT/DELETE {EPS_BASE_URL}/fhir/Patient[...]` and
+`{EPS_BASE_URL}/api/v1/patients/<guid>/clinics` (need-to-know check). The only
 patient data at rest here is the JSON `patient_excerpt` captured onto a
 `ServiceRequest` at create time.
 
