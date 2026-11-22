@@ -197,6 +197,11 @@ Steps:
 3. Finalize, then match/dispatch to the patient app's organisation as usual.
    The patient sees the task the next time the app reads its feed.
 
+The patient app's access token must carry the scope `patient_generated`
+(`flask provider register-pat --scopes read,write,patient_generated`). That
+scope is what lets it see whose order each feed item is and ask for one
+patient's orders; other providers' tokens get neither.
+
 Making a Questionnaire available (once per version, on the server):
 
 ```bash

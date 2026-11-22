@@ -15,7 +15,8 @@ from app.services.audit_service import log_event
 
 
 def list_for_provider(provider_org_guid, since=None, limit=50,
-                      include_archived=False, patient_guid=None):
+                      include_archived=False, patient_guid=None,
+                      expose_patient_guid=False):
     """List ServiceRequests matched to this provider org.
 
     Returns metadata only — no patient data (GDPR data minimization).
@@ -34,7 +35,11 @@ def list_for_provider(provider_org_guid, since=None, limit=50,
         include_archived: opt in to listing archived SRs as well
         patient_guid: #1043 — only this patient's ServiceRequests. A
             NARROWING filter inside the provider's own matches: it can never
-            return an item the unfiltered feed would not.
+            return an item the unfiltered feed would not. The ROUTE refuses
+            it for a PAT without scope `patient_generated`.
+        expose_patient_guid: #1043 — put `patient_guid` on each item. Off by
+            default, so a caller that does not decide gets the pre-#1043
+            shape; the route turns it on only for a `patient_generated` PAT.
 
     Returns:
         tuple: (result_dict, status_code)
@@ -72,15 +77,8 @@ def list_for_provider(provider_org_guid, since=None, limit=50,
     items = []
     for match, sr in results:
         snapshot = sr.plan_definition_snapshot or {}
-        items.append({
+        item = {
             'service_request_guid': sr.guid,
-            # #1043: the eps patient guid (pseudonymous, Rule 18), so a client
-            # serving several patients — the patient app — can tell whose
-            # order an item is without downloading every one. It discloses
-            # nothing this PAT cannot already read: every item listed here is
-            # matched to the PAT's organisation, and download_bundle returns
-            # the same patient_guid for exactly those matches.
-            'patient_guid': sr.patient_guid,
             'match_guid': match.guid,
             'status': match.status,
             'sr_status': sr.status,
@@ -93,7 +91,15 @@ def list_for_provider(provider_org_guid, since=None, limit=50,
             'period_start': sr.period_start.isoformat() if sr.period_start else None,
             'period_end': sr.period_end.isoformat() if sr.period_end else None,
             'download_url': f'/api/v1/provider/download/{sr.guid}',
-        })
+        }
+        if expose_patient_guid:
+            # #1043, operator decision 2026-11-22: the eps patient guid
+            # (pseudonymous, Rule 18) is in the feed ONLY for the patient
+            # app's credential, which must tell whose order an item is. For
+            # every other provider the feed is unchanged: metadata only, and
+            # the guid stays behind the per-order, audited download.
+            item['patient_guid'] = sr.patient_guid
+        items.append(item)
 
     return {'items': items, 'total': len(items)}, 200
 

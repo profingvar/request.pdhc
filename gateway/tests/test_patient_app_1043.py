@@ -148,18 +148,55 @@ def test_feed_needs_a_pat(client, auth_on):
     assert client.get('/api/v1/provider/feed').status_code == 401
 
 
-def test_feed_items_carry_the_patient_guid(client, app, auth_on):
+#: A feed item exactly as it was before #1043, for every PAT that is not the
+#: patient app. Keys AND order of construction; values checked below.
+LEGACY_FEED_KEYS = ['service_request_guid', 'match_guid', 'status', 'sr_status',
+                    'title', 'intent', 'priority', 'contract_guid', 'created_at',
+                    'updated_at', 'period_start', 'period_end', 'download_url']
+ORDINARY = 'read,write'
+
+
+def test_the_patient_app_pat_sees_the_patient_guid(client, app, auth_on):
     prov = str(uuid.uuid4())
     with app.app_context():
         sr = _order(prov)
         guid, patient, h = sr.guid, sr.patient_guid, _pat(prov)
     r = client.get('/api/v1/provider/feed', headers=h)
     assert r.status_code == 200
-    [item] = r.get_json()['items']
-    assert (item['service_request_guid'], item.get('patient_guid')) == (guid, patient)
+    items = r.get_json()['items']
+    assert [(i['service_request_guid'], i.get('patient_guid')) for i in items] == [(guid, patient)]
+    assert sorted(items[0]) == sorted(LEGACY_FEED_KEYS + ['patient_guid'])
 
 
-def test_feed_can_be_narrowed_to_one_patient(client, app, auth_on):
+def test_an_ordinary_pat_gets_the_feed_exactly_as_before(client, app, auth_on):
+    """provider1 / cgm: byte for byte the pre-#1043 item, no patient guid."""
+    prov = str(uuid.uuid4())
+    with app.app_context():
+        sr = _order(prov)
+        match = ServiceRequestContractMatch.query.filter_by(service_request_guid=sr.guid).one()
+        expected = {'items': [{
+            'service_request_guid': sr.guid, 'match_guid': match.guid,
+            'status': 'sent', 'sr_status': 'active', 'title': 'Blodtryck hemma',
+            'intent': sr.intent, 'priority': sr.priority,
+            'contract_guid': match.contract_guid,
+            'created_at': sr.created_at.isoformat(),
+            'updated_at': match.updated_at.isoformat(),
+            'period_start': None, 'period_end': None,
+            'download_url': f'/api/v1/provider/download/{sr.guid}'}], 'total': 1}
+        patient = sr.patient_guid
+        h = _pat(prov, scopes=ORDINARY)
+    r = client.get('/api/v1/provider/feed', headers=h)
+    assert r.status_code == 200
+    assert patient not in r.get_data(as_text=True), 'no patient guid anywhere in the body'
+    assert r.get_json() == expected
+    assert sorted(r.get_json()['items'][0]) == sorted(LEGACY_FEED_KEYS)
+    # byte-identical to what the pre-#1043 route serialised
+    with app.test_request_context():
+        from flask import jsonify
+        assert r.get_data() == jsonify(expected).get_data()
+
+
+def test_the_patient_app_can_narrow_the_feed_to_one_patient(client, app, auth_on):
     prov, anna, bo = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
     with app.app_context():
         a1, a2, b1 = (_order(prov, anna).guid, _order(prov, anna).guid,
@@ -172,9 +209,28 @@ def test_feed_can_be_narrowed_to_one_patient(client, app, auth_on):
     assert {i.get('patient_guid') for i in only} == {anna}
 
 
+@pytest.mark.parametrize('scopes', ['read,write', 'read'])
+def test_an_ordinary_pat_is_refused_the_patient_filter_by_name(client, app, auth_on, scopes):
+    """Refused, not ignored: ignoring it would hand back every patient's
+    orders to a client that asked for one."""
+    from app.models.audit_models import AuditLog
+    prov, anna = str(uuid.uuid4()), str(uuid.uuid4())
+    with app.app_context():
+        _order(prov, anna)
+        h = _pat(prov, scopes=scopes)
+    r = client.get(f'/api/v1/provider/feed?patient_guid={anna}', headers=h)
+    assert r.status_code == 403, r.get_json()
+    assert r.get_json().get('code') == 'patient_filter_requires_patient_generated'
+    assert 'items' not in r.get_json()
+    with app.app_context():
+        assert AuditLog.query.filter_by(action='feed.patient_filter.refused').count() == 1
+    # the same PAT without the filter still gets its feed
+    assert client.get('/api/v1/provider/feed', headers=h).status_code == 200
+
+
 def test_the_patient_filter_never_widens(client, app, auth_on):
-    """Another provider's PAT, asking for a patient it has no order for,
-    gets nothing — the filter narrows the PAT's own matches only."""
+    """Another patient-app-scoped PAT, asking for a patient it has no order
+    for, gets nothing — the filter narrows the PAT's own matches only."""
     prov, other, anna = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
     with app.app_context():
         _order(prov, anna)
@@ -182,6 +238,13 @@ def test_the_patient_filter_never_widens(client, app, auth_on):
     r = client.get(f'/api/v1/provider/feed?patient_guid={anna}', headers=h_other)
     assert r.status_code == 200 and r.get_json()['items'] == []
     assert client.get('/api/v1/provider/feed', headers=h_other).get_json()['items'] == []
+
+
+def test_the_dev_bypass_has_no_scope(client, app):
+    """AUTH_DISABLED has no PAT, so it is unscoped: no guid, filter refused."""
+    r = client.get('/api/v1/provider/feed?patient_guid=x')
+    assert (r.status_code, r.get_json().get('code')) == (
+        403, 'patient_filter_requires_patient_generated')
 
 
 # ── B. the download ──────────────────────────────────────────────────────

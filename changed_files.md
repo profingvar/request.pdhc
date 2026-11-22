@@ -729,3 +729,4 @@ false for 11 files; a hand survey cannot be the gate here.
 - 2026-11-22 #1043 gateway/app/__init__.py — flask questionnaire import|list
 - 2026-11-22 #1043 gateway/tests/test_patient_app_1043.py (NEW)
 - 2026-11-22 #1046 gateway/docs/architecture.md, operator-manual.md, api.md
+- 2026-11-22 #1043 feed scoping: gateway/app/api/provider.py, gateway/app/services/provider_feed_service.py, gateway/tests/test_patient_app_1043.py, gateway/docs/architecture.md, api.md, operator-manual.md

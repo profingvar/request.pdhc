@@ -1746,3 +1746,9 @@ Not done / known:
 - An order still needs a PlanDefinition even when it is only a form.
 - Options are read from `/api/v1/lookup/valuesets/<guid>/values`, which needs request's plan read key; without it `options` is null.
 - If plan.pdhc is unreachable at finalize, a plan-catalogue form is left without a snapshot and is absent from the order, silently. Pre-existing.
+
+
+## 2026-11-22 — #1043 feed patient guid only for the patient app (NOT deployed)
+
+- Operator decision: `patient_guid` on feed items and the `?patient_guid=` filter only for a PAT with scope `patient_generated`. Enforced HERE, where the PAT is validated and the items are built: `expose_patient_guid` defaults off, the route turns it on only for that scope, and the filter from any other PAT (and the dev bypass) is refused 403 `patient_filter_requires_patient_generated`, audited `feed.patient_filter.refused`.
+- Tests through the real route with real PATs: an ordinary PAT's feed is byte-identical to the pre-#1043 shape. 6 mutations each fail. Suite 562 -> 566 passed.

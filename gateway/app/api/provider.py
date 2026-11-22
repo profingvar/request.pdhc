@@ -11,6 +11,10 @@ from app.services.secret_crypto import decrypt as decrypt_secret
 
 provider_bp = Blueprint('provider', __name__)
 
+#: The PAT scope of a patient-facing client (#1014).
+PATIENT_GENERATED_SCOPE = 'patient_generated'
+PATIENT_FILTER_REFUSED = 'patient_filter_requires_patient_generated'
+
 
 @provider_bp.route('/provider/feed', methods=['GET'])
 @requires_provider_token(scope='read')
@@ -30,9 +34,29 @@ def feed():
         '1', 'true', 'yes',
     )
 
-    # #1043: narrow to one patient's orders (the patient app polls per
-    # logged-in patient). Only ever narrows the provider's own matches.
+    # #1043: the patient guid in the feed — on each item, and as a filter —
+    # is for the patient app only: a PAT carrying scope `patient_generated`.
+    # Decided HERE, where the PAT is validated and the items are built, so no
+    # proxy in front can leak what was never emitted. The dev bypass has no
+    # PAT and is therefore unscoped.
+    pat = getattr(g, 'provider_pat', None)
+    patient_scoped = bool(pat is not None and pat.has_scope(PATIENT_GENERATED_SCOPE))
     patient_guid = (request.args.get('patient_guid') or '').strip() or None
+    if patient_guid and not patient_scoped:
+        # Refused by name, never ignored: an ignored filter would answer with
+        # EVERY patient's orders to a client that asked for one.
+        log_event(
+            action='feed.patient_filter.refused',
+            resource_type='ServiceRequest',
+            details={'provider_org_guid': g.provider_org_guid,
+                     'reason': 'pat_without_patient_generated'},
+            ip_address=request.remote_addr,
+        )
+        return jsonify({
+            'code': PATIENT_FILTER_REFUSED,
+            'message': 'The patient_guid filter is available only to an access '
+                       'token with the scope patient_generated.',
+        }), 403
 
     data, status = list_for_provider(
         provider_org_guid=g.provider_org_guid,
@@ -40,6 +64,7 @@ def feed():
         limit=limit,
         include_archived=include_archived,
         patient_guid=patient_guid,
+        expose_patient_guid=patient_scoped,
     )
 
     log_event(

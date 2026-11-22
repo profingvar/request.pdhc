@@ -177,8 +177,12 @@ Auth header: `X-Provider-Token: <PAT>` — never the SSO Bearer.
 
 Lists SRs addressed to this provider — **metadata only**, no clinical data
 (GDPR data minimisation). Query params: `since`, `limit` (max 200),
-`include_archived`, and `patient_guid` (#1043: only that patient's orders).
-Each item carries the pseudonymous `patient_guid` (#1043).
+`include_archived`.
+
+For a PAT with scope `patient_generated` only (the patient app, #1043): each
+item also carries the pseudonymous `patient_guid`, and `patient_guid=<guid>`
+returns only that patient's orders. Any other PAT gets the items unchanged and
+`403 patient_filter_requires_patient_generated` if it sends the filter.
 
 ### `GET /api/v1/provider/download/<sr_guid>`
 
