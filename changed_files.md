@@ -716,3 +716,16 @@ false for 11 files; a hand survey cannot be the gate here.
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/docs/operator-manual.md
 - /Users/martiningvar/T7_sidewinder/request.pdhc/gateway/docs/architecture.md
 - /Users/martiningvar/T7_sidewinder/request.pdhc/readme.md
+
+- 2026-11-22 #1043 gateway/app/models/service_request_models.py — QuestionnaireResource; ServiceRequestForm.questionnaire_url/_version
+- 2026-11-22 #1043 gateway/migrations/versions/f2a3b4c5d6e7_questionnaire_registry.py (NEW)
+- 2026-11-22 #1043 gateway/app/services/questionnaire_service.py (NEW)
+- 2026-11-22 #1043 gateway/app/services/service_request_service.py — registry Questionnaire attach; finalize does not ask plan for it
+- 2026-11-22 #1043 gateway/app/services/context_service.py — labels, valueset options, transaction_detail, plan_maps; capture freezes label + options
+- 2026-11-22 #1043 gateway/app/services/provider_feed_service.py — download additions; feed patient_guid + filter
+- 2026-11-22 #1043 gateway/app/api/provider.py — feed ?patient_guid=
+- 2026-11-22 #1043 gateway/app/api/service_requests.py — attach by questionnaire_url; GET/POST /Questionnaire
+- 2026-11-22 #1043 gateway/app/routes/service_requests.py — form pickers list registry Questionnaires
+- 2026-11-22 #1043 gateway/app/__init__.py — flask questionnaire import|list
+- 2026-11-22 #1043 gateway/tests/test_patient_app_1043.py (NEW)
+- 2026-11-22 #1046 gateway/docs/architecture.md, operator-manual.md, api.md

@@ -137,6 +137,12 @@ class ServiceRequestForm(db.Model):
     form_snapshot = db.Column(db.JSON, nullable=True)
     render_ready_snapshot = db.Column(db.JSON, nullable=True)
     display_title = db.Column(db.String(255), nullable=True)
+    # #1043: set when the form is a Questionnaire from request.pdhc's own
+    # registry (QuestionnaireResource), referenced by canonical url + version,
+    # instead of a form from plan.pdhc's catalogue. form_guid then holds the
+    # registry row's guid and form_snapshot is frozen at ATTACH time.
+    questionnaire_url = db.Column(db.String(255), nullable=True)
+    questionnaire_version = db.Column(db.String(50), nullable=True)
     sort_order = db.Column(db.Integer, nullable=False, default=0)
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc),
@@ -151,10 +157,56 @@ class ServiceRequestForm(db.Model):
             'form_snapshot': self.form_snapshot,
             'render_ready_snapshot': self.render_ready_snapshot,
             'display_title': self.display_title,
+            'questionnaire_url': self.questionnaire_url,
+            'questionnaire_version': self.questionnaire_version,
             'sort_order': self.sort_order,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
         }
+
+
+class QuestionnaireResource(db.Model):
+    """A FHIR Questionnaire held by request.pdhc so a ServiceRequest can
+    reference it by canonical url + version (#1043).
+
+    plan.pdhc's form catalogue only holds forms built in plan's own form
+    builder; the PROMs in plans/PROMs/ and the patient EPS form are standalone
+    Questionnaire JSON with a canonical url. They are imported here
+    (`flask questionnaire import FILE`) and frozen onto the order when
+    attached, so the provider download can carry the Questionnaire inline.
+
+    One row per (url, version). A version is immutable: importing different
+    content under an existing url + version is refused, because orders already
+    issued carry a frozen copy and a silent change would make two orders that
+    name the same version differ.
+    """
+    __tablename__ = 'questionnaires'
+    __table_args__ = (
+        db.UniqueConstraint('url', 'version', name='uq_questionnaire_url_version'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    guid = db.Column(db.String(36), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
+    url = db.Column(db.String(255), nullable=False, index=True)
+    version = db.Column(db.String(50), nullable=False)
+    title = db.Column(db.String(255), nullable=True)
+    resource = db.Column(db.JSON, nullable=False)
+    content_hash = db.Column(db.String(64), nullable=False)
+    created_by = db.Column(db.String(64), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    def to_dict(self, with_resource=False):
+        d = {
+            'guid': self.guid,
+            'url': self.url,
+            'version': self.version,
+            'title': self.title,
+            'content_hash': self.content_hash,
+            'created_at': self.created_at.isoformat(),
+        }
+        if with_resource:
+            d['resource'] = self.resource
+        return d
 
 
 class ServiceRequestContractMatch(db.Model):

@@ -203,6 +203,33 @@ def create_app(testing=False):
                    f"in {r['groups']} patient+plandef group(s); plans reused "
                    f"{r['plans_reused']}, plans created {r['plans_created']}")
 
+    # #1043: Questionnaires a ServiceRequest references by canonical url.
+    @app.cli.group('questionnaire')
+    def questionnaire_group():
+        """FHIR Questionnaires held by request.pdhc (PROMs, patient EPS form)."""
+
+    @questionnaire_group.command('import')
+    @click.argument('file', type=click.Path(exists=True, dir_okay=False))
+    def questionnaire_import(file):
+        """Store a FHIR Questionnaire JSON file. Idempotent; a changed file
+        under an existing url+version is refused (publish a new version)."""
+        import json as _json
+        from app.services import questionnaire_service as qs
+        with open(file, encoding='utf-8') as fh:
+            resource = _json.load(fh)
+        try:
+            row, created = qs.import_questionnaire(resource, created_by='cli')
+        except qs.QuestionnaireInvalid as e:
+            raise click.ClickException(f'{e.code}: {e}')
+        click.echo(f"{'IMPORTED' if created else 'UNCHANGED'}: {row.url}|{row.version} "
+                   f"guid={row.guid} sha256={row.content_hash[:12]}")
+
+    @questionnaire_group.command('list')
+    def questionnaire_list():
+        from app.services import questionnaire_service as qs
+        for r in qs.list_questionnaires():
+            click.echo(f"{r['url']}|{r['version']}  {r['title'] or ''}  guid={r['guid']}")
+
     @app.cli.command('seed-1177-pat')
     def seed_1177_pat():
         """Issue a push PAT for 1177.pdhc.se webhook delivery."""

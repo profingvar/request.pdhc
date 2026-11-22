@@ -1723,3 +1723,26 @@ re-tag + recreate the worker with the app (#1011).
 - Health 200 and file hashes verified in the container; sibling smoke green before (pre-rename smoke) and after.
 - No behaviour change until `EPS_*` is set in .env: operator script `/tmp/epsdep/eps_env.sh <group>` (refuses until https://eps.pdhc.se answers as eps.pdhc).
 - App and worker both recreated.
+
+
+## 2026-11-22 — #1043 patient app: Questionnaire by canonical, download and feed (NOT deployed)
+
+Measured first (epic #1039):
+- **Single question / scheduled multi-measurement task: already orderable.** An order instantiates a PlanDefinition; one activity with one measurement is a question, several measurements and/or timing is an intervention. Dispatch to a provider organisation is by contract, unchanged.
+- **Questionnaire: only from plan.pdhc's form catalogue**, by plan form guid, frozen at finalize into `fhir_resource.contained`. The PROMs and the patient EPS form are standalone JSON in no catalogue, so they could not be ordered. A failed plan fetch at finalize still drops the form silently (unchanged, see below).
+- **Download** already had the patient guid, the frozen plan with schedule, concept name, unit, clinical range and (when frozen) response type. Missing: display label, the allowed interval (scale), choice options, a filled response type for unenriched snapshots, who ordered, and the Questionnaire as its own key.
+- **Feed** had no patient guid.
+
+Added:
+- `questionnaires` table + `service_request_forms.questionnaire_url/_version` (migration `f2a3b4c5d6e7`, single head; run in isolation on sqlite up/again/down, NOT on Postgres). `flask questionnaire import|list`, `GET/POST /api/v1/Questionnaire`, attach by `questionnaire_url` on `POST /ServiceRequest/<guid>/forms`, and the web form pickers list registry Questionnaires.
+- Download: `title`, `requesting_org_guid/_name`, `questionnaires[]` inline, and per measurement `label`, `response_type_name`, `scale_min/max`, `options`, `required`. Additive; pre-existing keys and values pinned by a test.
+- Feed: `patient_guid` per item and a narrowing `?patient_guid=` filter.
+- New orders freeze `concept_display_text` and `options` with the snapshot.
+- request's dispatch still sends no plan read key (#931): untouched.
+
+Tests: `tests/test_patient_app_1043.py`, 18, provider routes with auth ON and a real PAT, only `requests.get` to plan patched. 22 mutations each fail their tests. Suite 544 -> 562 passed.
+
+Not done / known:
+- An order still needs a PlanDefinition even when it is only a form.
+- Options are read from `/api/v1/lookup/valuesets/<guid>/values`, which needs request's plan read key; without it `options` is null.
+- If plan.pdhc is unreachable at finalize, a plan-catalogue form is left without a snapshot and is absent from the order, silently. Pre-existing.

@@ -164,19 +164,49 @@ finalize (`409 diagnosis_review_scope_missing`).
 
 ### 4.3 ServiceRequestForm (`service_request_forms`)
 
-Links an SR to one or more forms from the Plan catalogue. Unique on
-`(service_request_guid, form_guid)`.
+Links an SR to one or more forms: a form from the Plan catalogue, or (#1043)
+a Questionnaire from request.pdhc's own registry (4.3.1), referenced by
+canonical url + version. Unique on `(service_request_guid, form_guid)`.
 
 | Column | Type | Notes |
 |---|---|---|
 | `guid` | UUID v4 | |
 | `service_request_guid` | UUID v4 | FK → `service_requests.guid` |
-| `form_guid` | UUID v4 | references plan.pdhc form |
+| `form_guid` | UUID v4 | references plan.pdhc form, or the `questionnaires.guid` of a registry Questionnaire |
+| `questionnaire_url`, `questionnaire_version` | str(255) / str(50), nullable | set only for a registry Questionnaire (#1043); the canonical it was attached by |
 | `form_version` | str(50), nullable | |
 | `form_snapshot`, `render_ready_snapshot` | JSON | |
 | `display_title` | str(255), nullable | |
 | `sort_order` | int | default 0 |
 | `created_at`, `updated_at` | datetime | |
+
+`form_snapshot` is frozen at **finalize** for a plan-catalogue form (fetched
+from plan.pdhc) and at **attach** for a registry Questionnaire (plan.pdhc is
+not asked: it does not hold it).
+
+### 4.3.1 Questionnaire registry (`questionnaires`, #1043)
+
+plan.pdhc's form catalogue holds only forms built in its own form builder.
+The PROMs in `plans/PROMs/` and the patient EPS form
+(`https://plan.pdhc.se/fhir/Questionnaire/eps-patient`) are standalone FHIR
+Questionnaire JSON with a canonical url, so request.pdhc keeps the ones care
+may order. It is a store, not a form designer: nothing edits a Questionnaire.
+
+| Column | Type | Notes |
+|---|---|---|
+| `guid` | UUID v4 | what the form pickers post as `form_guid` |
+| `url`, `version` | str(255), str(50) | unique together. **A version is immutable**: importing different content under an existing url + version is refused (`questionnaire_version_conflict`), because issued orders carry a frozen copy |
+| `title` | str(255), nullable | |
+| `resource` | JSON | the Questionnaire exactly as imported |
+| `content_hash` | sha256 | of the canonical JSON; makes the import idempotent |
+| `created_by`, `created_at` | | |
+
+Loaded with `flask questionnaire import FILE` (or `POST /api/v1/Questionnaire`,
+admin); listed with `flask questionnaire list` / `GET /api/v1/Questionnaire`.
+Attached to a draft with `POST /api/v1/ServiceRequest/<guid>/forms`
+`{"questionnaire_url": "<canonical>[|version]", "questionnaire_version": "<optional>"}`,
+or from the form picker in the web UI. Without a version the most recently
+imported one is used and its version is recorded on the order.
 
 ### 4.4 ServiceRequestContractMatch (`service_request_contract_matches`)
 
@@ -439,12 +469,38 @@ identity truth.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| GET | `/provider/feed` | PAT `read` | List SRs for this provider — **metadata only** (data minimisation); audited `feed.accessed`. |
-| GET | `/provider/download/<sr_guid>` | PAT `read` | Download the full FHIR Bundle; issues a `DataExchangeGrant` if none exists and returns `grant_token`. |
+| GET | `/provider/feed` | PAT `read` | List SRs for this provider — **metadata only** (data minimisation); audited `feed.accessed`. Since #1043 each item carries the pseudonymous `patient_guid`, and `?patient_guid=<guid>` narrows the list to one patient. Neither discloses anything the PAT could not already read with a download of the same item; the filter only ever narrows the provider's own matches. |
+| GET | `/provider/download/<sr_guid>` | PAT `read` | Download the full FHIR Bundle; issues a `DataExchangeGrant` if none exists and returns `grant_token`. Payload: see 5.2.1. |
 | POST | `/provider/status/<sr_guid>` | PAT `write` | Canonical **lifecycle status** update; requires the composite key (`patient_guid`, `contract_guid`, `provider_org_guid`, `grant_token`). Body org must match the PAT. |
 | POST | `/provider/report/<sr_guid>` | PAT `write` | **DEPRECATED alias** of `/status`. Logs `report.deprecated_alias_used`. Observation *data* goes to **gateway.pdhc** `/provider/report`, not here. |
 | POST | `/provider/validate-token` | none (token is the credential) | Called by gateway.pdhc to resolve a raw PAT → org/contract/scopes/delivery-mode + decrypted push key. |
 | POST | `/provider/receipt/<receipt_token>/ack` | PAT `write` | Acknowledge a push-delivery receipt. |
+
+#### 5.2.1 Download payload (#1043 additions)
+
+The patient app (patientapp.pdhc) is a provider-style client that renders an
+order to a person, so the download carries what is needed to build an input
+per measurement. Everything below is **additive**; the keys provider1 and cgm
+read are unchanged.
+
+| Key | Meaning |
+|---|---|
+| `patient_guid` | the eps.pdhc patient guid (already present) |
+| `title`, `requesting_org_guid`, `requesting_org_name` | the order's title and who ordered it |
+| `care_plan.activities[]` | `title`, `description` (the instruction), `timing_type`, `timing` (FHIR Timing: the schedule), `transactions[]` |
+| `…transactions[].label` | the concept's display text from plan.pdhc, else its name |
+| `…transactions[].response_type` | `numeric` / `categorical` / `text` / `boolean` / `dateTime` / `graph`; `response_type_name` is plan.pdhc's own name |
+| `…transactions[].unit` | unit name |
+| `…transactions[].scale_min`, `scale_max` | the interval a value may lie in at all — the concept's scale, the same rule gateway enforces with `OUT_OF_SCALE` |
+| `…transactions[].range_min`, `range_max` | the clinical range (unchanged). A value outside it is still a valid answer |
+| `…transactions[].options` | for a choice concept: `[{value, label, code}]` in plan's order (`value` is what the observation carries); `null` when not a choice or not known |
+| `…transactions[].required` | `requirement_type == "required"` |
+| `questionnaires[]` | `{form_guid, url, version, title, questionnaire}` — each attached Questionnaire **inline, as frozen**. The copies in `fhir_resource.contained` are rewritten for R5 and re-identified |
+
+The frozen snapshot wins; plan.pdhc is asked only for what the snapshot lacks
+(one look-up per download, with request's read key, #931). Orders created
+since #1043 freeze `concept_display_text` and `options` at creation, next to
+`response_type` and `unit` (#583).
 
 ### 5.3 Internal endpoints (`app/api/internal.py`, `X-Service-Key`)
 

@@ -10,11 +10,12 @@ from app.models.service_request_models import (
     ServiceRequest, ServiceRequestContractMatch,
 )
 from app.services.grant_service import issue_grant, use_grant
+from app.services import context_service, questionnaire_service
 from app.services.audit_service import log_event
 
 
 def list_for_provider(provider_org_guid, since=None, limit=50,
-                      include_archived=False):
+                      include_archived=False, patient_guid=None):
     """List ServiceRequests matched to this provider org.
 
     Returns metadata only — no patient data (GDPR data minimization).
@@ -31,6 +32,9 @@ def list_for_provider(provider_org_guid, since=None, limit=50,
         since: ISO datetime string, return only items updated after this
         limit: max items to return
         include_archived: opt in to listing archived SRs as well
+        patient_guid: #1043 — only this patient's ServiceRequests. A
+            NARROWING filter inside the provider's own matches: it can never
+            return an item the unfiltered feed would not.
 
     Returns:
         tuple: (result_dict, status_code)
@@ -52,6 +56,9 @@ def list_for_provider(provider_org_guid, since=None, limit=50,
         ),
     )
 
+    if patient_guid:
+        query = query.filter(ServiceRequest.patient_guid == patient_guid)
+
     if since:
         try:
             since_dt = datetime.fromisoformat(since.replace('Z', '+00:00'))
@@ -67,6 +74,13 @@ def list_for_provider(provider_org_guid, since=None, limit=50,
         snapshot = sr.plan_definition_snapshot or {}
         items.append({
             'service_request_guid': sr.guid,
+            # #1043: the eps patient guid (pseudonymous, Rule 18), so a client
+            # serving several patients — the patient app — can tell whose
+            # order an item is without downloading every one. It discloses
+            # nothing this PAT cannot already read: every item listed here is
+            # matched to the PAT's organisation, and download_bundle returns
+            # the same patient_guid for exactly those matches.
+            'patient_guid': sr.patient_guid,
             'match_guid': match.guid,
             'status': match.status,
             'sr_status': sr.status,
@@ -163,6 +177,14 @@ def download_bundle(service_request_guid, provider_org_guid, contract_guid,
         'period_end': sr.period_end.isoformat() if sr.period_end else None,
         'care_plan_guid': sr.care_plan_guid,
         'care_plan': instantiated_care_plan(sr),
+        # #1043 — additive, for a client that renders the order to a person
+        # (the patient app). Existing keys above are unchanged.
+        'title': (sr.plan_definition_snapshot or {}).get('title'),
+        'requesting_org_guid': sr.requester_org_guid,
+        'requesting_org_name': sr.requester_org_name,
+        # The order's Questionnaires INLINE, as frozen. The copies in
+        # fhir_resource.contained are rewritten for R5 and re-identified.
+        'questionnaires': questionnaire_service.for_download(sr),
     }, 200
 
 
@@ -204,6 +226,39 @@ def _fhir_timing(a):
     return {'repeat': rep} if rep else None
 
 
+def _download_transaction(t, maps=None):
+    """One measurement of the order, as the provider download carries it.
+
+    The first eleven keys are the pre-#1043 shape, values unchanged. #1043
+    ADDS what a client needs to render an input: `label`, `response_type_name`,
+    `scale_min`/`scale_max` (the allowed interval gateway enforces with
+    OUT_OF_SCALE — not `range_min`/`range_max`, the clinical range), `options`
+    and `required`. `response_type` and `unit` are filled from plan.pdhc only
+    where the frozen snapshot has none (they used to be null there).
+    """
+    detail = context_service.transaction_detail(t, maps)
+    return {
+        'transaction_guid': t.get('transaction_guid') or t.get('guid'),
+        'concept_guid': t.get('concept_guid'),
+        'concept_name': t.get('concept_name'),
+        'unit': t.get('unit') or t.get('concept_unit_name') or detail['unit'],
+        'response_type': t.get('response_type') or detail['response_type'],
+        'requirement_type': t.get('requirement_type'),
+        'range_min': t.get('range_min'),
+        'range_max': t.get('range_max'),
+        'recommended_range_min': t.get('recommended_range_min'),
+        'recommended_range_max': t.get('recommended_range_max'),
+        'action_limit_source': t.get('action_limit_source'),
+        # ── #1043 ──
+        'label': detail['label'],
+        'response_type_name': detail['response_type_name'],
+        'scale_min': detail['scale_min'],
+        'scale_max': detail['scale_max'],
+        'options': detail['options'],
+        'required': detail['required'],
+    }
+
+
 def instantiated_care_plan(sr):
     """The plan THIS order instantiates, from the snapshot frozen when the
     order was created (2026-11-19, asked for by a provider: reading the live
@@ -218,6 +273,8 @@ def instantiated_care_plan(sr):
     """
     snap = sr.plan_definition_snapshot or {}
     acts = []
+    # ONE look at plan.pdhc's concept maps for the whole order (#1043).
+    maps = context_service.plan_maps()
     for a in sorted(snap.get('activities') or [], key=lambda x: x.get('sort_order') or 0):
         acts.append({
             'activity_guid': a.get('activity_guid') or a.get('guid'),
@@ -231,20 +288,10 @@ def instantiated_care_plan(sr):
                  'system': 'http://unitsofmeasure.org', 'code': a.get('sample_interval_unit')}
                 if a.get('timing_type') == 'continuous' and a.get('sample_interval_value')
                 else None),
-            'transactions': [{
-                'transaction_guid': t.get('transaction_guid') or t.get('guid'),
-                'concept_guid': t.get('concept_guid'),
-                'concept_name': t.get('concept_name'),
-                'unit': t.get('unit') or t.get('concept_unit_name'),
-                'response_type': t.get('response_type'),
-                'requirement_type': t.get('requirement_type'),
-                'range_min': t.get('range_min'),
-                'range_max': t.get('range_max'),
-                'recommended_range_min': t.get('recommended_range_min'),
-                'recommended_range_max': t.get('recommended_range_max'),
-                'action_limit_source': t.get('action_limit_source'),
-            } for t in sorted(a.get('transactions') or [],
-                              key=lambda x: x.get('sort_order') or 0)],
+            'transactions': [
+                _download_transaction(t, maps)
+                for t in sorted(a.get('transactions') or [],
+                                key=lambda x: x.get('sort_order') or 0)],
         })
     return {
         'care_plan_guid': sr.care_plan_guid,

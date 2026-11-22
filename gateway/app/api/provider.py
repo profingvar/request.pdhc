@@ -30,11 +30,16 @@ def feed():
         '1', 'true', 'yes',
     )
 
+    # #1043: narrow to one patient's orders (the patient app polls per
+    # logged-in patient). Only ever narrows the provider's own matches.
+    patient_guid = (request.args.get('patient_guid') or '').strip() or None
+
     data, status = list_for_provider(
         provider_org_guid=g.provider_org_guid,
         since=since,
         limit=limit,
         include_archived=include_archived,
+        patient_guid=patient_guid,
     )
 
     log_event(
@@ -43,6 +48,7 @@ def feed():
         details={
             'provider_org_guid': g.provider_org_guid,
             'result_count': len(data.get('items', [])),
+            'patient_guid_filter': patient_guid,
         },
         ip_address=request.remote_addr,
     )

@@ -32,8 +32,14 @@ _GATEWAY_RESPONSE_TYPES = frozenset(
     {'numeric', 'categorical', 'text', 'boolean', 'dateTime', 'graph'}
 )
 
-_plan_cache = {'ts': 0.0, 'rt': {}, 'rt_name': {}, 'unit': {}, 'scale': {}}
+_plan_cache = {'ts': 0.0, 'rt': {}, 'rt_name': {}, 'unit': {}, 'scale': {},
+               'valueset': {}, 'label': {}}
 _PLAN_TTL = 300.0
+
+# #1043: {valueset_guid: (monotonic ts, [options])}. Only SUCCESSFUL fetches
+# are stored, so a plan.pdhc blip is retried on the next call rather than
+# remembered as "this concept has no alternatives".
+_options_cache = {}
 
 
 def _unlist(payload):
@@ -89,6 +95,7 @@ def _refresh_plan_maps():
         unit_name = {u.get('guid'): (u.get('unit_name') or '')
                      for u in _unlist(un.json())}
         rt_map, rt_name_map, unit_map, scale_map = {}, {}, {}, {}
+        valueset_map, label_map = {}, {}
         for c in concepts:
             cg = c.get('guid')
             if not cg:
@@ -99,6 +106,12 @@ def _refresh_plan_maps():
             lo, hi = c.get('range_low'), c.get('range_high')
             if lo is not None or hi is not None:
                 scale_map[cg] = (lo, hi)
+            # #1043: the concept's valueset (its answer alternatives) and its
+            # display text, for a client that must render an input for it.
+            if c.get('valueset'):
+                valueset_map[cg] = c['valueset']
+            if c.get('concept_display_text'):
+                label_map[cg] = c['concept_display_text']
             plan_rt = rt_name.get(c.get('response_type'), '').strip()
             mapped = _PLAN_RT_TO_GATEWAY.get(plan_rt.lower())
             if mapped:
@@ -113,7 +126,8 @@ def _refresh_plan_maps():
                 unit_map[cg] = u
         if rt_map or unit_map or rt_name_map:
             _plan_cache.update(rt=rt_map, rt_name=rt_name_map,
-                               unit=unit_map, scale=scale_map, ts=now)
+                               unit=unit_map, scale=scale_map,
+                               valueset=valueset_map, label=label_map, ts=now)
     except (requests.RequestException, ValueError, KeyError, TypeError):
         return  # keep stale maps
 
@@ -136,6 +150,110 @@ def _plan_concept_scales():
 def _plan_concept_response_type_names():
     _refresh_plan_maps()
     return _plan_cache['rt_name']
+
+
+def _plan_concept_labels():
+    _refresh_plan_maps()
+    return _plan_cache.get('label') or {}
+
+
+def plan_maps():
+    """One refresh attempt, then the cached maps as a plain dict (#1043).
+
+    For a caller that describes MANY transactions in one request (the provider
+    download): the `_plan_concept_*` accessors each try a refresh, so with
+    plan.pdhc down and nothing cached they would wait out a timeout per
+    lookup. `options_down` is per-call state: after one failed valueset fetch
+    the rest of that request does not try again.
+    """
+    _refresh_plan_maps()
+    return {**_plan_cache, 'options_down': False}
+
+
+def _plan_concept_options(concept_guid, maps=None):
+    """The answer alternatives plan.pdhc binds to a concept (#1043), as
+    ``[{'value', 'label', 'code'}]`` in plan's sort order, or ``None``.
+
+    ``value`` is plan's value_name — the string a categorical observation
+    carries; ``label`` is its display text; ``code`` is the value's guid.
+    ``None`` means "not known" (no valueset bound, or plan.pdhc could not be
+    asked) and is distinct from ``[]``, a bound valueset with no members.
+    Read with request's own plan read key (#931); a failure is not cached.
+    """
+    if maps is None:
+        _refresh_plan_maps()
+    vs_guid = ((maps or _plan_cache).get('valueset') or {}).get(concept_guid)
+    if not vs_guid:
+        return None
+    now = time.monotonic()
+    hit = _options_cache.get(vs_guid)
+    if hit and (now - hit[0]) < _PLAN_TTL:
+        return hit[1]
+    if maps is not None and maps.get('options_down'):
+        return hit[1] if hit else None
+    base = (current_app.config.get('PLAN_BASE_URL') or '').rstrip('/')
+    if not base:
+        return None
+    try:
+        from app.services.plan_auth import plan_read_headers
+        resp = requests.get(
+            f'{base}/api/v1/lookup/valuesets/{vs_guid}/values',
+            headers={'Accept': 'application/json', **plan_read_headers()},
+            timeout=6)
+        resp.raise_for_status()
+        values = _unlist(resp.json())
+        options = []
+        for v in values:
+            if not isinstance(v, dict):
+                continue
+            name = v.get('value_name') or v.get('value_display_text')
+            if not name:
+                continue
+            options.append({'value': str(name),
+                            'label': str(v.get('value_display_text') or name),
+                            'code': v.get('guid')})
+    except (requests.RequestException, ValueError, KeyError, TypeError):
+        if maps is not None:
+            maps['options_down'] = True
+        return hit[1] if hit else None  # stale-if-error, else unknown
+    _options_cache[vs_guid] = (now, options)
+    return options
+
+
+def transaction_detail(tx, maps=None):
+    """What a client needs to render an input for one snapshot transaction
+    (#1043): label, answer type, unit, the allowed interval and the options.
+
+    The snapshot's own values win (a captured request describes itself, #583);
+    plan.pdhc is the fallback. ``scale_min``/``scale_max`` are the concept's
+    SCALE — the interval gateway enforces with OUT_OF_SCALE — resolved the
+    same way ``_extract_transactions`` resolves it for gateway, so what the
+    client is told and what gateway refuses are one rule. They are NOT
+    ``range_min``/``range_max``, the clinical range a value may well leave.
+    """
+    if maps is None:
+        maps = plan_maps()
+    cg = tx.get('concept_guid')
+    scale = (maps.get('scale') or {}).get(cg) or (None, None)
+    response_type = _infer_response_type(tx, rt_map=maps.get('rt') or {})
+    options = tx.get('options')
+    if options is None and response_type == 'categorical':
+        options = _plan_concept_options(cg, maps)
+    return {
+        'label': (tx.get('concept_display_text')
+                  or (maps.get('label') or {}).get(cg)
+                  or tx.get('concept_name') or ''),
+        'response_type': response_type,
+        'response_type_name': (tx.get('response_type_name')
+                               or (maps.get('rt_name') or {}).get(cg)
+                               or ''),
+        'unit': tx.get('unit') or tx.get('concept_unit_name')
+                or (maps.get('unit') or {}).get(cg),
+        'scale_min': tx.get('scale_min') if tx.get('scale_min') is not None else scale[0],
+        'scale_max': tx.get('scale_max') if tx.get('scale_max') is not None else scale[1],
+        'options': options,
+        'required': (tx.get('requirement_type') or 'required') == 'required',
+    }
 
 
 def enrich_snapshot_concepts(snapshot):
@@ -197,6 +315,17 @@ def enrich_snapshot_concepts(snapshot):
                 unit = unit_map.get(concept_guid)
                 if unit:
                     tx['unit'] = unit
+            # #1043: the display text and, for a choice concept, its answer
+            # alternatives — frozen with the order for the same reason as the
+            # three above. Absent when plan.pdhc gives none.
+            if not tx.get('concept_display_text'):
+                label = _plan_concept_labels().get(concept_guid)
+                if label:
+                    tx['concept_display_text'] = label
+            if tx.get('options') is None and tx.get('response_type') == 'categorical':
+                options = _plan_concept_options(concept_guid)
+                if options is not None:
+                    tx['options'] = options
     return snapshot
 
 
@@ -305,7 +434,7 @@ def get_sr_context(sr_guid):
     return context
 
 
-def _infer_response_type(tx):
+def _infer_response_type(tx, rt_map=None):
     """Resolve gateway-compatible response_type for a plan transaction.
 
     gateway's ObservationValidator requires a response_type, but the SR
@@ -331,7 +460,9 @@ def _infer_response_type(tx):
         return own
     concept_guid = tx.get('concept_guid')
     if concept_guid:
-        resolved = _plan_concept_response_types().get(concept_guid)
+        if rt_map is None:
+            rt_map = _plan_concept_response_types()
+        resolved = rt_map.get(concept_guid)
         if resolved:
             return resolved
     if tx.get('range_min') is not None or tx.get('range_max') is not None:

@@ -175,13 +175,25 @@ Auth header: `X-Provider-Token: <PAT>` — never the SSO Bearer.
 
 ### `GET /api/v1/provider/feed`
 
-Lists SRs addressed to this provider — **metadata only**, no patient data
-(GDPR data minimisation). Query params: `since`, `limit` (max 200).
+Lists SRs addressed to this provider — **metadata only**, no clinical data
+(GDPR data minimisation). Query params: `since`, `limit` (max 200),
+`include_archived`, and `patient_guid` (#1043: only that patient's orders).
+Each item carries the pseudonymous `patient_guid` (#1043).
 
 ### `GET /api/v1/provider/download/<sr_guid>`
 
 Returns the full FHIR Bundle for one SR. Issues a fresh
-`DataExchangeGrant` if none exists.
+`DataExchangeGrant` if none exists. Also carries the frozen plan
+(`care_plan`), and since #1043 per measurement `label`, `scale_min`/`scale_max`,
+`options`, `required`, plus `title`, `requesting_org_name` and the attached
+Questionnaires inline (`questionnaires[]`) — see architecture.md 5.2.1.
+
+### `GET /api/v1/Questionnaire`, `POST /api/v1/Questionnaire` (SSO)
+
+The Questionnaires a ServiceRequest can reference by canonical url (#1043).
+`GET` lists them; `GET ?url=<canonical>[|version]` returns one with its JSON.
+`POST` (admin) stores a FHIR Questionnaire: 201 new, 200 unchanged, 409
+`questionnaire_version_conflict`, 422 for an unusable resource.
 
 ### `POST /api/v1/provider/status/<sr_guid>`
 

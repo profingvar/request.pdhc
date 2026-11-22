@@ -383,6 +383,10 @@ def create_view():
         forms_list = forms_data.get('forms', forms_data.get('items', forms_data.get('entry', [])))
     else:
         forms_list = forms_data if isinstance(forms_data, list) else []
+    # #1043: Questionnaires held by request.pdhc itself (PROMs, the patient
+    # EPS form), referenced by canonical url, listed next to plan's forms.
+    from app.services import questionnaire_service
+    forms_list = list(forms_list or []) + questionnaire_service.catalogue_entries()
 
     # The organisation picker (#226) is the SAME control as the patient-list
     # scope now, so there is one list and one selection. Names prefer the
@@ -464,6 +468,9 @@ def view_detail(guid):
             available_forms = cat_data.get('forms', cat_data.get('items', cat_data.get('entry', [])))
         elif isinstance(cat_data, list):
             available_forms = cat_data
+        from app.services import questionnaire_service  # #1043
+        available_forms = (list(available_forms or [])
+                           + questionnaire_service.catalogue_entries())
 
     # #984: an order lists the diagnosis reviews created from it.
     diagnosis_reviews = [c.to_dict() for c in ServiceRequest.query.filter_by(

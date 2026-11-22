@@ -173,7 +173,44 @@ Not a bug — the consent-at-dispatch gate (Lag 2022:913 §5, #229) refused
 because the destination caregiver holds no valid patient consent (or a
 concept-narrowed consent that doesn't cover the payload). Confirm the
 `careplan.dispatch.refused` audit row and check the patient's consents in
-ips.pdhc.
+eps.pdhc (the patient registry, formerly ips.pdhc).
+
+## 4a) Ordering a task to the patient app (#1043)
+
+The patient app (patientapp.pdhc) is a provider organisation like any other:
+it has its own contract and a PAT with scope `read,write,patient_generated`.
+Staff order to it exactly as to another provider — there is no separate flow.
+The patient is the one registered in **eps.pdhc**.
+
+| The patient should… | Order |
+|---|---|
+| answer **one question** | a PlanDefinition with one activity and one measurement |
+| do a **recurring task** (e.g. take the blood pressure daily) | a PlanDefinition whose activity has several measurements and/or a schedule. The activity's title and description are shown to the patient as the task and its instruction |
+| fill in a **form** (PROM, the EPS form) | any PlanDefinition, plus the Questionnaire attached under *Forms* |
+
+Steps:
+
+1. *New service request*: choose the patient, the PlanDefinition and the
+   patient app's contract.
+2. For a form: pick the Questionnaire in the *Forms* list. Questionnaires held
+   by request.pdhc appear there with their version, next to plan.pdhc's forms.
+3. Finalize, then match/dispatch to the patient app's organisation as usual.
+   The patient sees the task the next time the app reads its feed.
+
+Making a Questionnaire available (once per version, on the server):
+
+```bash
+flask questionnaire import /path/to/eps_patient_v1.json   # IMPORTED / UNCHANGED
+flask questionnaire list
+```
+
+A changed file under the same url + version is refused
+(`questionnaire_version_conflict`): raise the `version` in the file and import
+again. Orders already issued keep the version they were issued with.
+
+Answers to the EPS form (`…/Questionnaire/eps-patient`) are stored as
+patient-generated and wait for a professional's approval in the dashboard
+before they can reach the patient summary; they are never used unreviewed.
 
 ## 5) Tests
 

@@ -459,8 +459,23 @@ def list_forms(guid):
 def add_form(guid):
     """Attach a form to a draft ServiceRequest."""
     payload = request.get_json(silent=True)
+    # #1043: a Questionnaire may be named by canonical url (+ version) instead
+    # of a plan.pdhc form guid.
+    if payload and payload.get('questionnaire_url') and not payload.get('form_guid'):
+        from app.services import questionnaire_service
+        data, status = questionnaire_service.attach_by_canonical(
+            sr_guid=bleach.clean(guid),
+            url=str(payload['questionnaire_url']),
+            version=(str(payload['questionnaire_version'])
+                     if payload.get('questionnaire_version') else None),
+            sort_order=int(payload.get('sort_order', 0)),
+            user_guid=get_current_user_guid(),
+            ip_address=request.remote_addr,
+        )
+        return jsonify(data), status
     if not payload or not payload.get('form_guid'):
-        return jsonify({'code': 'bad_request', 'message': 'form_guid is required'}), 400
+        return jsonify({'code': 'bad_request',
+                        'message': 'form_guid or questionnaire_url is required'}), 400
 
     data, status = service_request_service.add_form_to_request(
         sr_guid=bleach.clean(guid),
@@ -543,3 +558,39 @@ def proxy_contracts():
     """Proxy Contract list from contract.pdhc."""
     data, status = contract_service.list_contracts()
     return jsonify(data), status
+
+
+# ---------------------------------------------------------------------------
+# #1043: Questionnaire registry (canonical url + version)
+# ---------------------------------------------------------------------------
+
+@service_requests_bp.route('/Questionnaire', methods=['GET'])
+@requires_auth
+def list_questionnaires():
+    """Questionnaires a ServiceRequest can reference by canonical url.
+    `?url=<canonical>[|version]` returns that one with its JSON."""
+    from app.services import questionnaire_service
+    url = request.args.get('url')
+    if url:
+        row = questionnaire_service.resolve(url, request.args.get('version'))
+        if row is None:
+            return jsonify({'code': 'questionnaire_not_found',
+                            'message': 'No such Questionnaire is stored'}), 404
+        return jsonify(row.to_dict(with_resource=True)), 200
+    items = questionnaire_service.list_questionnaires()
+    return jsonify({'items': items, 'total': len(items)}), 200
+
+
+@service_requests_bp.route('/Questionnaire', methods=['POST'])
+@requires_auth
+@requires_role('admin')
+def import_questionnaire():
+    """Store a FHIR Questionnaire (admin). Same as `flask questionnaire import`."""
+    from app.services import questionnaire_service
+    try:
+        row, created = questionnaire_service.import_questionnaire(
+            request.get_json(silent=True), created_by=get_current_user_guid())
+    except questionnaire_service.QuestionnaireInvalid as e:
+        status = 409 if e.code == 'questionnaire_version_conflict' else 422
+        return jsonify({'code': e.code, 'message': str(e)}), status
+    return jsonify(row.to_dict()), (201 if created else 200)

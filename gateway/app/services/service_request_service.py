@@ -335,6 +335,10 @@ def finalize_service_request(guid, user_guid=None, ip_address=None):
 
     # Snapshot attached forms (freeze Questionnaire + render-ready at point-of-issue)
     for srf in sr.forms:
+        # #1043: a Questionnaire attached from request.pdhc's own registry was
+        # frozen at attach time and is unknown to plan.pdhc's form catalogue.
+        if srf.questionnaire_url:
+            continue
         q_data, q_status = form_service.get_questionnaire(srf.form_guid)
         if q_status == 200:
             srf.form_snapshot = q_data
@@ -472,6 +476,17 @@ def add_form_to_request(sr_guid, form_guid, form_version=None, sort_order=0,
     ).first()
     if existing:
         return {'code': 'duplicate', 'message': 'Form already attached to this request'}, 409
+
+    # #1043: the guid of a Questionnaire in request.pdhc's own registry (what
+    # the form pickers list next to plan's catalogue) attaches that
+    # Questionnaire, frozen now, rather than asking plan.pdhc for a form.
+    from app.models.service_request_models import QuestionnaireResource
+    from app.services import questionnaire_service
+    registry_row = QuestionnaireResource.query.filter_by(guid=form_guid).first()
+    if registry_row is not None:
+        return questionnaire_service.attach_row(
+            sr, registry_row, sort_order=sort_order,
+            user_guid=user_guid, ip_address=ip_address)
 
     # Fetch display title from Plan catalogue
     form_data, form_status = form_service.get_form(form_guid)
