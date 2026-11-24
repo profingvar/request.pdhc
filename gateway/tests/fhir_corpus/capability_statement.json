@@ -1,5 +1,5 @@
 {
-  "date": "2026-07-02T07:11:38Z",
+  "date": "2026-11-24T14:00:00Z",
   "description": "Dispatch service for the PDHC platform. Handles patient CarePlan CRUD (#310), PlanDefinition dispatch to caregivers (HMAC-signed webhook with idempotency + DLQ + PDL consent gate), FHIR R5 ServiceRequest workflow, and Questionnaire/Form distribution to external rendering services. Not an alerting engine — threshold evaluation and DetectedIssue/Flag emission are out of scope by design (see docs/decisions/ADR-001-alerting-scope.md).",
   "fhirVersion": "5.0.0",
   "format": [
@@ -18,6 +18,11 @@
     {
       "mode": "server",
       "operation": [
+        {
+          "definition": "https://request.pdhc.se/api/v1/OperationDefinition/patient-extract",
+          "documentation": "GET /api/v1/patient-extract/{patient_guid} — Everything request.pdhc holds about one patient, every version (pdhc.patient-extract/1, #1059). A doctor or nurse at the patient's unit, or SU, on their own SSO token.",
+          "name": "patient-extract"
+        },
         {
           "definition": "https://request.pdhc.se/api/v1/OperationDefinition/request-feed",
           "documentation": "GET /api/v1/requests?provider_guid={guid}&since={iso-datetime} — Provider subscription feed. Returns dispatched requests filtered by provider_guid with cursor-based pagination. Supports X-API-Key authentication for service-to-service calls.",
@@ -114,10 +119,19 @@
               "code": "read"
             },
             {
+              "code": "vread"
+            },
+            {
+              "code": "history-instance"
+            },
+            {
               "code": "search-type"
             },
             {
               "code": "create"
+            },
+            {
+              "code": "patch"
             }
           ],
           "operation": [
@@ -125,6 +139,21 @@
               "definition": "https://request.pdhc.se/api/v1/OperationDefinition/ServiceRequest-update-snapshot",
               "documentation": "PUT /api/v1/ServiceRequest/{id}/snapshot — Update the editable PlanDefinition snapshot (draft only).",
               "name": "ServiceRequest-update-snapshot"
+            },
+            {
+              "definition": "https://request.pdhc.se/api/v1/OperationDefinition/ServiceRequest-history",
+              "documentation": "GET /api/v1/ServiceRequest/{id}/_history — Every version of the order, newest first (Bundle type history, #1054).",
+              "name": "ServiceRequest-history"
+            },
+            {
+              "definition": "https://request.pdhc.se/api/v1/OperationDefinition/ServiceRequest-vread",
+              "documentation": "GET /api/v1/ServiceRequest/{id}/_history/{vid} — One version of the order as it was (#1054).",
+              "name": "ServiceRequest-vread"
+            },
+            {
+              "definition": "https://request.pdhc.se/api/v1/OperationDefinition/ServiceRequest-patch",
+              "documentation": "PATCH /api/v1/ServiceRequest/{id} — Draft: edit notes, priority, reason, encounter_guid, supporting_info, replaces. Sent: only {\"note\": ...}, appended; anything else is 409 service_request_locked - create a replacement with \"replaces\" (#1054).",
+              "name": "ServiceRequest-patch"
             },
             {
               "definition": "https://request.pdhc.se/api/v1/OperationDefinition/ServiceRequest-finalize",
@@ -183,6 +212,7 @@
             }
           ],
           "profile": "http://hl7.org/fhir/StructureDefinition/ServiceRequest",
+          "readHistory": true,
           "searchParam": [
             {
               "name": "status",
@@ -197,7 +227,8 @@
               "type": "number"
             }
           ],
-          "type": "ServiceRequest"
+          "type": "ServiceRequest",
+          "versioning": "versioned"
         },
         {
           "documentation": "Questionnaire resources are proxied from the Plan service (plan.pdhc.se) form catalogue. Forms are attached to ServiceRequests and their FHIR Questionnaire + render-ready JSON are frozen at finalize time. Contained Questionnaires are delivered inside the push bundle.",

@@ -114,6 +114,22 @@ draft → active → completed / archived / revoked
 
 ---
 
+## A sent order cannot be changed (#1054)
+
+Once a ServiceRequest has been finalized it is part of the record. From then on:
+
+- you can **add a note** (it is added with your name and the time; earlier notes stay);
+- you can **archive** or **revoke** it — give a reason when you revoke (makulering);
+  a revoked order stays revoked;
+- anything else — plan, forms, priority, reason — is refused. Create a **new**
+  order that *replaces* the old one; when the new one is sent, the old one is
+  revoked automatically and says which order replaced it.
+
+Every earlier state of an order is kept and can be read back version by version
+(`/api/v1/ServiceRequest/<guid>/_history`). A doctor or nurse at the patient's
+care unit can take out everything request.pdhc holds about a patient, with all
+versions, for the journal extract (#1059).
+
 ## Who Can See What?
 
 - **SU administrators** see all ServiceRequests across all organisations

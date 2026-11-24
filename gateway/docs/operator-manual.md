@@ -217,6 +217,22 @@ Answers to the EPS form (`…/Questionnaire/eps-patient`) are stored as
 patient-generated and wait for a professional's approval in the dashboard
 before they can reach the patient summary; they are never used unreviewed.
 
+## 4b) Order history is append-only (#1054)
+
+`service_request_history` and `care_plan_history` refuse UPDATE and DELETE in
+the database. A deliberate purge of SYNTHETIC data (a fresh-start wipe) must go
+through `app.services.history_guard.history_purge(db.session)`, which allows
+DELETE only, for that one transaction (Postgres: `SET LOCAL
+request.allow_history_purge = 'on'`). A sent order (status other than draft)
+cannot be deleted through the ORM either; revoke it.
+
+Orders that existed before the migration are version 1 with
+`version_reason` = `pre-1054: versioning began here; ...`; their earlier
+changes were never recorded and the patient extract says so.
+
+Tests: `pip install -r requirements-test.txt` (adds fhir.resources 8.3.0 for
+R5 validation; not in the production image).
+
 ## 5) Tests
 
 ```bash

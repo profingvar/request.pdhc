@@ -290,6 +290,13 @@ def capability_statement():
             ],
             'operation': [
                 _op(
+                    'patient-extract',
+                    'GET /api/v1/patient-extract/{patient_guid}',
+                    ('Everything request.pdhc holds about one patient, every version '
+                     '(pdhc.patient-extract/1, #1059). A doctor or nurse at the '
+                     "patient's unit, or SU, on their own SSO token."),
+                ),
+                _op(
                     'request-feed',
                     'GET /api/v1/requests?provider_guid={guid}&since={iso-datetime}',
                     (

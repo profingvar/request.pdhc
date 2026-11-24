@@ -263,6 +263,61 @@ Since #1045 an `X-API-Key` caller is the person in `get_current_access_blob()`
 (before: None, so patient gates refused an affiliated professional and audit
 rows had `user_guid` NULL), and `@audit_read` records `data_subject_guid`.
 
+## 12c) Versioned orders and the lock after draft (#1054, record.pdhc stage 2)
+
+Every change to a ServiceRequest or CarePlan after creation leaves the previous
+state in `service_request_history` / `care_plan_history` (append-only: a
+database trigger refuses UPDATE and DELETE). `version` on the order is the
+current version.
+
+- `GET /api/v1/ServiceRequest/<guid>/_history` — FHIR Bundle `type: history`,
+  newest first, one entry per version (`meta.versionId`, `meta.lastUpdated`).
+- `GET /api/v1/ServiceRequest/<guid>/_history/<n>` — one version as it was
+  (ETag `W/"n"`). 404 OperationOutcome for a version that does not exist.
+  Request's own status `archived` renders as R5 `completed` with
+  `meta.tag` `https://request.pdhc.se/fhir/CodeSystem/order-status|archived`.
+- `PATCH /api/v1/ServiceRequest/<guid>` — draft: `notes`, `priority`,
+  `reason`, `encounter_guid`, `supporting_info`, `replaces`, `note`.
+  After draft ONLY `{"note": "..."}`, which is APPENDED (author, time). Any
+  other field on a sent order:
+  `409 {"code":"service_request_locked","locked_fields":[...],"replace_with":{"method":"POST","path":"/api/v1/ServiceRequest","body":{"replaces":["<guid>"]}}}`.
+  `status` here is 400 `use_status_route` (use /finalize, /archive, /revoke).
+- `PUT .../snapshot` and the form add/remove/reorder routes on a sent order
+  now answer **409 `service_request_locked`** (were 400 `invalid_status`).
+- `POST .../revoke` takes `{"reason": "..."}` (makulering). Recorded as a
+  note `Makulerad: <reason>` and as the change reason of the version it ends.
+  Required for a journal order (one with an encounter). Revoking an order that
+  is already revoked is now 409; archiving a revoked order is 409.
+
+New create fields (`POST /api/v1/ServiceRequest`), all optional:
+
+| field | shape | FHIR R5 |
+|---|---|---|
+| `reason` | `[{"concept": {...}}]` or `[{"reference": "Condition/<id>[/_history/n]"}]` (Condition, Observation, DiagnosticReport, DocumentReference, DetectedIssue, Procedure) | `reason` (CodeableReference) |
+| `encounter_guid` | CDR Encounter guid | `encounter` |
+| `replaces` | `[<ServiceRequest guid>]`, same patient, not draft, not revoked | `replaces`; each replaced active order is REVOKED when this one is finalized (409 `replaced_has_accepted` if a provider accepted it) |
+| `supporting_info` | `["ClinicalImpression/<id>", ...]` | appended to `supportingInfo` |
+
+Every order now carries `identifier` = `https://request.pdhc.se/fhir/NamingSystem/order-id|<guid>`.
+A journal order (with `encounter_guid`) needs `reason` or a note before
+`/finalize` (409 `reason_or_note_required`, invariant bestallning-1).
+
+## 12d) Patient extract (#1059, record.pdhc stage 6b)
+
+`GET /api/v1/patient-extract/<patient guid>` — everything request.pdhc holds
+about one patient, shape `pdhc.patient-extract/1`
+(`plans/record_pdhc_extract_contract.md`). Sections `service_requests` (every
+version), `care_plans` (every version), `dispatches` (one R5 Task per send to
+a provider), `data_exchange_grants` (type and dates only). No personnummer
+(the contained Patient's identifier is removed), no receipt or grant tokens.
+
+Gate: a person (own SSO token on `X-API-Key` or a session; PAT or `service`
+blob 403 `person_required`); SU, or a professional whose affiliation with role
+`doctor` or `nurse` is to one of the patient's units (else 403); eps
+unreachable 502; unknown patient 404. Audited `patient_extract` /
+`patient_extract.denied` with `data_subject_guid`, so it shows in the access
+log (12b).
+
 ## 13) Internal — service-to-service
 
 Service-key auth only (`X-Service-Key`). Never exposed externally.

@@ -97,6 +97,10 @@ def create_app(testing=False):
     from app.api.access_log import access_log_bp
     app.register_blueprint(access_log_bp, url_prefix='/api/v1')
 
+    # #1059 record.pdhc extract: everything request holds about one patient
+    from app.api.patient_extract import patient_extract_bp
+    app.register_blueprint(patient_extract_bp, url_prefix='/api/v1')
+
     from app.api.capability import capability_bp
     app.register_blueprint(capability_bp, url_prefix='/api/v1')
 

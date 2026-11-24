@@ -583,6 +583,23 @@ request.pdhc:
 
 Any failure aborts with 4xx + `OperationOutcome`.
 
+### 5.7 Versioned orders (#1054)
+
+`app/services/versioning.py` installs a SQLAlchemy `before_flush` hook. For
+each changed ServiceRequest / CarePlan it reads the row as stored (a Core
+SELECT on the flushing connection), writes it to the history table, bumps
+`version`, records who/why (`note_change()` at each mutation site; otherwise
+`unattributed:<endpoint>`), and adds an `*.status_changed` audit row. For a
+ServiceRequest whose stored status is not `draft` it refuses any change other
+than status, notes/annotations, the derived `fhir_resource`,
+`completion_record`, and a first fill of `contract_guid` / `care_plan_guid`
+(raises `ServiceRequestLocked`; the app's error handler answers 409). No
+return to draft; no status change out of revoked / entered-in-error.
+`app/services/history_guard.py` holds the append-only triggers (pattern of
+cdr.pdhc's #984 guard). `app/services/sr_journal.py` builds identifier,
+reason, encounter, replaces, supportingInfo and note for both the stored
+resource and every rendered version.
+
 ## 6) Operational dependencies
 
 | Dependency | Purpose | Failure mode |

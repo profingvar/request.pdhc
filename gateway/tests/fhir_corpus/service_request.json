@@ -185,6 +185,12 @@
     }
   ],
   "id": "00000000-0000-4000-8000-000000000007",
+  "identifier": [
+    {
+      "system": "https://request.pdhc.se/fhir/NamingSystem/order-id",
+      "value": "00000000-0000-4000-8000-000000000007"
+    }
+  ],
   "instantiatesCanonical": [
     "https://plan.pdhc.se/api/v1/plandefinitions/00000000-0000-4000-8000-000000000002"
   ],
