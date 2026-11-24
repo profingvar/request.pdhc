@@ -59,6 +59,33 @@ class ServiceRequest(db.Model):
     # what icd11.pdhc reported at completion: CDR Condition ids + version ids
     completion_record = db.Column(db.JSON, nullable=True)
 
+    # #1054 (record.pdhc stage 2, JournalBestallning). All nullable: orders
+    # written before #1054 carry none of them, and none is required of an
+    # ordinary platform order. A JOURNAL order is one that names its encounter
+    # (plan D2); for those, finalize requires reason or note (bestallning-1).
+    # reason: R5 CodeableReference[] - a code, or a Condition/Observation/...
+    reason = db.Column(db.JSON, nullable=True)
+    # the CDR Encounter (vardkontakt) the order was written in, by guid.
+    # Nullable now; required for journal orders once record.pdhc creates
+    # encounters (plan D2). Not resolved against the CDR here.
+    encounter_guid = db.Column(db.String(36), nullable=True, index=True)
+    # guids of the orders this one replaces. Each is revoked (with a history
+    # version) when THIS order is finalized, not when it is drafted.
+    replaces = db.Column(db.JSON, nullable=True)
+    # R5 supportingInfo references beyond the ones the builder derives
+    # (contained CarePlan, Contract, Questionnaires), e.g. a ClinicalImpression.
+    supporting_info = db.Column(db.JSON, nullable=True)
+    # notes added AFTER the order left draft: append-only list of
+    # {text, time, author_guid, kind}. `notes` is the note written with the
+    # order; together they are FHIR ServiceRequest.note.
+    annotations = db.Column(db.JSON, nullable=True)
+
+    # #1054 versioning: the CURRENT version's number, who made it and why.
+    # Earlier versions live in service_request_history (append-only).
+    version = db.Column(db.Integer, nullable=False, default=1, server_default='1')
+    version_author_guid = db.Column(db.String(36), nullable=True)
+    version_reason = db.Column(db.Text, nullable=True)
+
     # Validity period
     period_start = db.Column(db.DateTime, nullable=True)
     period_end = db.Column(db.DateTime, nullable=True)
@@ -101,8 +128,22 @@ class ServiceRequest(db.Model):
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
             'forms': [f.to_dict() for f in self.forms],
+            # #1054
+            'identifier': self.order_identifier(),
+            'reason': self.reason or [],
+            'encounter_guid': self.encounter_guid,
+            'replaces': self.replaces or [],
+            'supporting_info': self.supporting_info or [],
+            'annotations': self.annotations or [],
+            'version': self.version,
             **self._diagnosis_review_dict(),
         }
+
+    def order_identifier(self):
+        """#1054: the order's business identifier (JournalBestallning
+        identifier 1..1). The value IS the guid - see sr_journal.py."""
+        from app.services.sr_journal import order_identifier
+        return order_identifier(self.guid)
 
     def _diagnosis_review_dict(self):
         """#984 fields; display_label/work_link only for a diagnosis review."""

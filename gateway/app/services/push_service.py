@@ -434,6 +434,9 @@ def _check_auto_archive_on_fulfillment(service_request_guid):
     if resolved and has_accepted:
         sr = ServiceRequest.query.filter_by(guid=service_request_guid).first()
         if sr and sr.status == 'active':
+            from app.services.versioning import note_change
+            note_change(sr, None, 'all matches resolved, one accepted',
+                        'auto_archive_on_fulfillment')
             sr.status = 'archived'
             db.session.commit()
             log_event(

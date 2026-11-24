@@ -225,6 +225,9 @@ def create():
         contract_guid=payload.get('contract_guid'),
         notes=payload.get('notes'),
         ip_address=request.remote_addr,
+        # #1054 JournalBestallning fields
+        journal={k: payload[k] for k in ('reason', 'encounter_guid', 'encounter', 'replaces',
+                                         'supporting_info', 'supportingInfo') if k in payload},
     )
     return jsonify(data), status
 
@@ -325,13 +328,98 @@ def archive(guid):
 @requires_role('read_write')
 @sr_patient_gate('revoke')
 def revoke(guid):
-    """Revoke a ServiceRequest."""
+    """Revoke (makulera) a ServiceRequest. Body `{"reason": "..."}` (#1054),
+    required for a journal order."""
+    payload = request.get_json(silent=True) or {}
+    reason = payload.get('reason') if isinstance(payload, dict) else None
     data, status = service_request_service.revoke_service_request(
         guid=bleach.clean(guid),
         user_guid=get_current_user_guid(),
         ip_address=request.remote_addr,
+        reason=bleach.clean(str(reason)) if reason else None,
     )
     return jsonify(data), status
+
+
+@service_requests_bp.route('/ServiceRequest/<guid>', methods=['PATCH'])
+@requires_auth
+@requires_role('read_write')
+@sr_patient_gate('patch')
+def patch(guid):
+    """#1054: edit a draft, or append a note to a sent order. Anything else
+    on a sent order is 409 service_request_locked."""
+    payload = request.get_json(silent=True)
+    if isinstance(payload, dict):
+        for k in ('note', 'notes'):
+            if isinstance(payload.get(k), str):
+                payload[k] = bleach.clean(payload[k])
+    data, status = service_request_service.patch_service_request(
+        guid=bleach.clean(guid), payload=payload,
+        user_guid=get_current_user_guid(), ip_address=request.remote_addr)
+    return jsonify(data), status
+
+
+def _visible_sr(guid):
+    sr = ServiceRequest.query.filter_by(guid=bleach.clean(guid)).first()
+    if sr is None:
+        return None
+    from app.services import ips_client
+    if not ips_client.is_sr_visible(sr):  # spärr, as GET /ServiceRequest/<guid>
+        return None
+    return sr
+
+
+def _fhir_not_found(msg):
+    return jsonify({'resourceType': 'OperationOutcome', 'issue': [{
+        'severity': 'error', 'code': 'not-found', 'diagnostics': msg}]}), 404
+
+
+@service_requests_bp.route('/ServiceRequest/<guid>/_history', methods=['GET'])
+@requires_auth
+@audit_read('service_request.history.read', resource_type='ServiceRequest', guid_arg='guid')
+@sr_patient_gate('history')
+def history(guid):
+    """#1054 FHIR history-instance: every version, newest first (Bundle
+    type history)."""
+    from app.services import versioning
+    sr = _visible_sr(guid)
+    if sr is None:
+        return _fhir_not_found('ServiceRequest not found')
+    base = request.url_root.rstrip('/') + '/api/v1/ServiceRequest'
+    entries = []
+    for v in reversed(versioning.sr_versions(sr)):
+        res = versioning.render_sr(v['ns'], v['fhir'], v['version'], v['recorded_at'])
+        entries.append({
+            'fullUrl': f"{base}/{sr.guid}",
+            'resource': res,
+            'request': {'method': 'POST' if v['version'] == 1 else 'PUT',
+                        'url': f"ServiceRequest/{sr.guid}" if v['version'] > 1
+                        else 'ServiceRequest'},
+            'response': {'status': '201 Created' if v['version'] == 1 else '200 OK',
+                         'etag': f'W/"{v["version"]}"',
+                         **({'lastModified': v['recorded_at']} if v['recorded_at'] else {})},
+        })
+    return jsonify({'resourceType': 'Bundle', 'type': 'history',
+                    'total': len(entries), 'entry': entries}), 200
+
+
+@service_requests_bp.route('/ServiceRequest/<guid>/_history/<vid>', methods=['GET'])
+@requires_auth
+@audit_read('service_request.vread', resource_type='ServiceRequest', guid_arg='guid')
+@sr_patient_gate('vread')
+def vread(guid, vid):
+    """#1054 FHIR vread: ONE version of the order, as it was."""
+    from app.services import versioning
+    sr = _visible_sr(guid)
+    if sr is None:
+        return _fhir_not_found('ServiceRequest not found')
+    for v in versioning.sr_versions(sr):
+        if str(v['version']) == str(vid).strip():
+            res = versioning.render_sr(v['ns'], v['fhir'], v['version'], v['recorded_at'])
+            resp = jsonify(res)
+            resp.headers['ETag'] = f'W/"{v["version"]}"'
+            return resp, 200
+    return _fhir_not_found(f'ServiceRequest {sr.guid} has no version {vid}')
 
 
 @service_requests_bp.route('/ServiceRequest/<guid>/matches', methods=['GET'])

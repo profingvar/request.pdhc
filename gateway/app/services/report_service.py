@@ -87,9 +87,8 @@ def submit_report(service_request_guid, patient_guid, provider_org_guid,
             'received_at': datetime.now(timezone.utc).isoformat(),
         }
 
-    # Store the report payload on the SR for traceability
-    if not sr.notes:
-        sr.notes = ''
+    # #1054: this used to set sr.notes = '' when it was None - a no-op for
+    # the reader that now would write a spurious order version per report.
     db.session.commit()
 
     # 6. Audit

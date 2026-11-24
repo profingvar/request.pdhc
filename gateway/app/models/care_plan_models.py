@@ -69,6 +69,12 @@ class CarePlan(db.Model):
     # Care team — list of user_guids responsible for this plan
     care_team_user_guids = db.Column(db.JSON, nullable=True)
 
+    # #1054 versioning: the CURRENT version; earlier ones are in
+    # care_plan_history (append-only). Status and goals change after creation.
+    version = db.Column(db.Integer, nullable=False, default=1, server_default='1')
+    version_author_guid = db.Column(db.String(36), nullable=True)
+    version_reason = db.Column(db.Text, nullable=True)
+
     # Audit
     created_by_user_guid = db.Column(db.String(36), nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False,
@@ -95,6 +101,7 @@ class CarePlan(db.Model):
             'goals': self.goals or [],
             'care_team_user_guids': self.care_team_user_guids or [],
             'created_by_user_guid': self.created_by_user_guid,
+            'version': self.version,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
         }

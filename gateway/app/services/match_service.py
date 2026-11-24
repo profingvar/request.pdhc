@@ -111,6 +111,11 @@ def dispatch_to_provider(service_request_guid, contract_guid, provider_org_guid,
     )
     db.session.add(match)
 
+    # #1054: the dispatch fills the contract (once) and rebuilds the derived
+    # resource; both allowed after draft, and versioned.
+    from app.services.versioning import note_change
+    note_change(sr, user_guid, f'dispatched to {provider_org_guid}', 'dispatch')
+
     # Set contract on the SR if not already set
     if not sr.contract_guid:
         sr.contract_guid = contract_guid
@@ -199,6 +204,8 @@ def find_and_create_matches(service_request_guid, user_guid=None, ip_address=Non
         created.append(match)
 
     if created:
+        from app.services.versioning import note_change
+        note_change(sr, user_guid, f'matched {len(created)} contract(s)', 'match')
         if not sr.contract_guid:
             sr.contract_guid = created[0].contract_guid
         from app.services.fhir_builder_service import build_service_request_resource

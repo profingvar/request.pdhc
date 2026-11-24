@@ -1,0 +1,11 @@
+# Test-only dependencies (#1054). The app itself never imports these, so they
+# are NOT in requirements.txt and do not enter the production image.
+#
+#   pip install -r requirements.txt -r requirements-test.txt
+#
+# fhir.resources 8 validates R5 (its default) - the same pin plan.pdhc and
+# sso.pdhc carry. The versioning and extract tests validate every rendered
+# ServiceRequest / CarePlan / Task with it; without it those checks SKIP
+# (visible in the pytest summary) and only the structural asserts run.
+-r requirements.txt
+fhir.resources==8.3.0

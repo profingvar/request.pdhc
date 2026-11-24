@@ -50,6 +50,8 @@ def archive_if_provider_work_complete(sr, source='gateway.pdhc',
     if any(m.status not in _TERMINAL for m in matches):
         return False
 
+    from app.services.versioning import note_change
+    note_change(sr, None, 'all provider matches terminal', f'auto_archive:{source}')
     sr.status = 'archived'
     log_event(
         action='servicerequest.auto_archived',
@@ -209,6 +211,9 @@ def _complete_diagnosis_review(sr, source, cdr_conditions, ip_address):
                 'message': f'ServiceRequest is {sr.status}, not active'}, 409
 
     now = datetime.now(timezone.utc)
+    from app.services.versioning import note_change
+    note_change(sr, None, f'diagnosis review completed by {source}',
+                'diagnosis_review.complete')
     sr.status = 'completed'
     sr.completion_record = {'source': source, 'completed_at': now.isoformat(),
                             'conditions': conditions}

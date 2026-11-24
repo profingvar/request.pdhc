@@ -105,12 +105,15 @@ def _build_careplan(sr_model, snapshot, patient_name, patient_id_ref):
         'id': f'careplan-{sr_model.guid}',
         'status': 'active',
         'intent': 'plan',
-        'title': snapshot.get('title', ''),
         'subject': {
             'reference': patient_id_ref,
             'display': patient_name,
         },
     }
+
+    # #1054: an empty title is not R5-valid (string pattern); omit it.
+    if snapshot.get('title'):
+        careplan['title'] = snapshot['title']
 
     if snapshot.get('description'):
         careplan['description'] = snapshot['description']
@@ -481,6 +484,11 @@ def build_service_request_resource(sr_model):
 
     if form_refs:
         resource['supportingInfo'].extend(form_refs)
+
+    # #1054 JournalBestallning: identifier, reason, encounter, replaces,
+    # extra supportingInfo, and note = notes + post-draft annotations.
+    from app.services.sr_journal import apply_journal_elements
+    apply_journal_elements(resource, sr_model)
 
     # Belt-and-braces — strip any residual `_pdhc_*` markers that
     # might survive from callers who mutate the resource dict before

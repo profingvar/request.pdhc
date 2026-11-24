@@ -51,6 +51,11 @@ def create_app(testing=False):
     # Import models so they are registered with SQLAlchemy.
     # #320: removed `export_models` — see deletion below.
     from app.models import dispatch_models, audit_models, service_request_models, security_models  # noqa: F401
+    # #1054: version history of orders and care plans, append-only.
+    from app.models import care_plan_models, history_models  # noqa: F401
+    from app.services import history_guard, versioning
+    history_guard.install()
+    versioning.install()
 
     @login_manager.user_loader
     def load_user(user_id):
@@ -183,6 +188,17 @@ def create_app(testing=False):
         if request.path.startswith('/api/'):
             return jsonify({'code': 'not_found', 'message': 'Resource not found'}), 404
         return e
+
+    @app.errorhandler(versioning.ServiceRequestLocked)
+    def service_request_locked(e):
+        # #1054: a change the journal rule forbids, from ANY code path (the
+        # before_flush hook raises it), answers 409 by name, never 500.
+        from flask import jsonify, request, flash, redirect
+        db.session.rollback()
+        if request.path.startswith('/api/'):
+            return jsonify(e.as_response()), 409
+        flash(str(e), 'danger')
+        return redirect(request.referrer or '/'), 303
 
     @app.errorhandler(500)
     def internal_error(e):

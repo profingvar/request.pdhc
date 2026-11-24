@@ -230,7 +230,7 @@ class TestServiceLayer:
                 data, status = service_request_service.get_service_request(sr.guid)
             assert status == 404
             assert data.get("code") == "not_found"
-            db.session.delete(sr)
+            pass  # #1054: a sent order cannot be deleted; conftest's purge wipes it
             db.session.commit()
 
     def test_get_returns_200_when_unblocked(self, app):
@@ -241,7 +241,7 @@ class TestServiceLayer:
                 data, status = service_request_service.get_service_request(sr.guid)
             assert status == 200
             assert data["guid"] == sr.guid
-            db.session.delete(sr)
+            pass  # #1054: a sent order cannot be deleted; conftest's purge wipes it
             db.session.commit()
 
     def test_get_returns_200_when_lift_active(self, app):
@@ -254,7 +254,7 @@ class TestServiceLayer:
             with patch("app.services.ips_client._default_client", return_value=fake):
                 data, status = service_request_service.get_service_request(sr.guid)
             assert status == 200
-            db.session.delete(sr)
+            pass  # #1054: a sent order cannot be deleted; conftest's purge wipes it
             db.session.commit()
 
     def test_list_filters_blocked_srs(self, app):
@@ -284,7 +284,7 @@ class TestServiceLayer:
             assert all(i["requester_org_guid"] == ORG_OK
                        for i in data["items"] if i["guid"] in own)
             for sr in srs:
-                db.session.delete(sr)
+                pass  # #1054: a sent order cannot be deleted; conftest's purge wipes it
             db.session.commit()
 
     def test_list_passes_through_without_blocks(self, app):
@@ -303,7 +303,7 @@ class TestServiceLayer:
                 "with no blocks in play every SR this test created must come "
                 f"back; missing {own - returned}")
             for sr in srs:
-                db.session.delete(sr)
+                pass  # #1054: a sent order cannot be deleted; conftest's purge wipes it
             db.session.commit()
 
     def test_list_total_uses_unfiltered_count(self, app):
@@ -334,5 +334,5 @@ class TestServiceLayer:
             returned = {i["guid"] for i in data["items"]}
             assert returned & own == {srs[0].guid}
             for sr in srs:
-                db.session.delete(sr)
+                pass  # #1054: a sent order cannot be deleted; conftest's purge wipes it
             db.session.commit()

@@ -128,8 +128,9 @@ def catalogue_entries():
 def attach_row(sr, row, sort_order=0, user_guid=None, ip_address=None):
     """Attach a registry Questionnaire to a draft ServiceRequest, frozen now."""
     if sr.status != 'draft':
-        return {'code': 'invalid_status',
-                'message': 'Can only add forms in draft status'}, 400
+        # #1054: a sent order is locked; 409 with how to replace it
+        from app.services.versioning import ServiceRequestLocked
+        return ServiceRequestLocked(sr.guid, ['forms']).as_response(), 409
     dup = ServiceRequestForm.query.filter_by(
         service_request_guid=sr.guid, form_guid=row.guid).first()
     if dup:

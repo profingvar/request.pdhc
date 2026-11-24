@@ -150,9 +150,12 @@ def db_session(app, _database):
     with app.app_context():
         yield _database.session
         _database.session.rollback()
-        for table in reversed(_database.metadata.sorted_tables):
-            _database.session.execute(table.delete())
-        _database.session.commit()
+        # #1054: the history tables refuse DELETE (trigger + ORM guard); the
+        # per-test wipe of synthetic rows is the purge they allow by name.
+        from app.services.history_guard import history_purge
+        with history_purge(_database.session):
+            for table in reversed(_database.metadata.sorted_tables):
+                _database.session.execute(table.delete())
 
 
 @pytest.fixture

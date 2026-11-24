@@ -29,6 +29,7 @@ Completion runs through `completion_service.mark_service_request_completed`
 from __future__ import annotations
 
 import copy
+import uuid
 from datetime import datetime, timezone
 
 from flask import current_app
@@ -240,6 +241,11 @@ def create_for_order(parent, user_guid=None, ip_address=None) -> list:
     for act in actions:
         exts = scope_extensions(act)
         child = ServiceRequest(
+            # #1054: guid and created_at set here so the resource is built
+            # BEFORE the insert - otherwise the version written at creation
+            # has no fhir_resource and the first real version is a v2.
+            guid=str(uuid.uuid4()),
+            created_at=datetime.now(timezone.utc),
             status='active',
             intent=parent.intent or 'order',
             priority=parent.priority or 'routine',
@@ -269,9 +275,12 @@ def create_for_order(parent, user_guid=None, ip_address=None) -> list:
             period_start=parent.period_start,
             period_end=parent.period_end,
         )
-        db.session.add(child)
-        db.session.flush()  # guid + created_at for the resource
         child.fhir_resource = build_fhir_resource(child)
+        from app.services.versioning import note_change
+        note_change(child, user_guid, f'created at finalize of ServiceRequest/{parent.guid}',
+                    'diagnosis_review.create')
+        db.session.add(child)
+        db.session.flush()
         created.append(child)
         log_event(
             user_guid=user_guid,

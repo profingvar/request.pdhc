@@ -12,18 +12,76 @@ from app.services.fhir_builder_service import build_service_request_resource, bu
 from app.services.audit_service import log_event
 from app.services import scope_service
 from app.services import ips_client
+from app.services import sr_journal
+from app.services.versioning import note_change, ServiceRequestLocked
+
+#: #1054: the 409 an edit of a sent order answers with (sketch section 6:
+#: after draft only status and note change; anything else is a new order).
+def _locked(sr, fields):
+    return ServiceRequestLocked(sr.guid, fields).as_response(), 409
 
 logger = logging.getLogger(__name__)
 
 
+def validate_journal_fields(payload, patient_guid, own_guid=None):
+    """#1054: the JournalBestallning fields of a create or draft edit, normalised.
+    Returns (fields, None) or (None, (error_body, status)). Only keys present in
+    `payload` are returned, so a draft edit changes only what it names."""
+    out = {}
+    try:
+        if 'reason' in payload:
+            out['reason'] = sr_journal.normalise_reason(payload.get('reason'))
+        enc_key = 'encounter_guid' if 'encounter_guid' in payload else (
+            'encounter' if 'encounter' in payload else None)
+        if enc_key:
+            out['encounter_guid'] = sr_journal.normalise_encounter(payload.get(enc_key))
+        si_key = 'supporting_info' if 'supporting_info' in payload else (
+            'supportingInfo' if 'supportingInfo' in payload else None)
+        if si_key:
+            out['supporting_info'] = sr_journal.normalise_supporting_info(payload.get(si_key))
+        if 'replaces' in payload:
+            out['replaces'] = sr_journal.normalise_replaces(payload.get('replaces'))
+    except sr_journal.JournalFieldInvalid as e:
+        return None, ({'code': e.code, 'message': str(e)}, 400)
+    for g in out.get('replaces') or []:
+        if g == own_guid:
+            return None, ({'code': 'replaces_self',
+                           'message': 'an order cannot replace itself'}, 400)
+        old = ServiceRequest.query.filter_by(guid=g).first()
+        if old is None:
+            return None, ({'code': 'replaces_not_found',
+                           'message': f'replaces: ServiceRequest {g} not found'}, 404)
+        if old.patient_guid != patient_guid:
+            return None, ({'code': 'replaces_other_patient',
+                           'message': f'replaces: ServiceRequest {g} is about another patient'}, 409)
+        if old.status == 'draft':
+            return None, ({'code': 'replaces_draft',
+                           'message': f'ServiceRequest {g} is a draft; edit it instead of '
+                                      'replacing it'}, 409)
+        if old.status in ('revoked', 'entered-in-error'):
+            return None, ({'code': 'replaces_terminal',
+                           'message': f'ServiceRequest {g} is already {old.status}'}, 409)
+    return out, None
+
+
 def create_service_request(patient_guid, plan_definition_guid, user_guid, org_guid=None,
                            user_name=None, org_name=None,
-                           contract_guid=None, notes=None, ip_address=None):
+                           contract_guid=None, notes=None, ip_address=None,
+                           journal=None):
     """Create a draft ServiceRequest by fetching patient + PlanDefinition data.
+
+    `journal` (#1054): the dict of create-payload keys reason, encounter_guid,
+    replaces, supporting_info. Validated before anything is fetched.
 
     Returns:
         tuple: (result_dict, status_code)
     """
+    journal_fields, err = validate_journal_fields(journal or {}, patient_guid)
+    if err:
+        log_event(user_guid=user_guid, action='service_request.create.refused',
+                  resource_type='ServiceRequest', data_subject_guid=patient_guid,
+                  details={'reason': err[0]['code']}, ip_address=ip_address)
+        return err
     # Fetch patient from IPS
     patient_data, patient_status = patient_service.get_patient(patient_guid)
     if patient_status != 200:
@@ -151,6 +209,7 @@ def create_service_request(patient_guid, plan_definition_guid, user_guid, org_gu
         requester_org_guid=org_guid,
         requester_org_name=org_name,
         notes=notes,
+        **journal_fields,
     )
     db.session.add(sr)
     db.session.commit()
@@ -167,7 +226,9 @@ def create_service_request(patient_guid, plan_definition_guid, user_guid, org_gu
                  'patient_org_guid': patient_org_guid,
                  'patient_org_resolved': patient_org_guid is not None,
                  'care_plan_guid': care_plan.guid,
-                 'care_plan_created': care_plan_created},
+                 'care_plan_created': care_plan_created,
+                 'replaces': sr.replaces or [],
+                 'encounter_guid': sr.encounter_guid},
         ip_address=ip_address,
     )
 
@@ -303,12 +364,13 @@ def update_plan_definition_snapshot(guid, edited_snapshot, user_guid=None, ip_ad
     if not sr:
         return {'code': 'not_found', 'message': 'ServiceRequest not found'}, 404
     if sr.status != 'draft':
-        return {'code': 'invalid_status', 'message': 'Can only edit PlanDefinition in draft status'}, 400
+        return _locked(sr, ['plan_definition_snapshot'])
 
     try:
         merged, changes = action_limits.merge_edit(sr.plan_definition_snapshot, edited_snapshot)
     except action_limits.InvalidActionLimit as e:
         return {'code': 'invalid_action_limit', 'message': str(e)}, 400
+    note_change(sr, user_guid, 'draft edit: PlanDefinition snapshot', 'edit_plandef')
     sr.plan_definition_snapshot = merged
     db.session.commit()
 
@@ -333,6 +395,29 @@ def finalize_service_request(guid, user_guid=None, ip_address=None):
     if sr.status != 'draft':
         return {'code': 'invalid_status', 'message': 'Can only finalize a draft ServiceRequest'}, 400
 
+    # #1054 bestallning-1: a JOURNAL order (one that names its encounter,
+    # plan D2) states its question - as a reason or a note. Ordinary platform
+    # orders without an encounter are not held to it (yet).
+    if sr.encounter_guid and not sr_journal.reason_or_note_present(sr):
+        return {'code': 'reason_or_note_required',
+                'message': 'A journal order (with an encounter) needs a reason or a '
+                           'note before it is sent (bestallning-1).'}, 409
+    # the orders this one replaces must still be revocable now
+    replaced = []
+    for g in sr.replaces or []:
+        old = ServiceRequest.query.filter_by(guid=g).first()
+        if old is None or old.patient_guid != sr.patient_guid:
+            return {'code': 'replaces_not_found',
+                    'message': f'replaces: ServiceRequest {g} not found'}, 409
+        if old.status in ('active', 'on-hold'):
+            if ServiceRequestContractMatch.query.filter_by(
+                    service_request_guid=g, status='accepted').count():
+                return {'code': 'replaced_has_accepted',
+                        'message': f'ServiceRequest {g} has an accepted provider match '
+                                   'and cannot be revoked; it cannot be replaced'}, 409
+            replaced.append(old)
+
+    note_change(sr, user_guid, 'finalized: sent', 'finalize')
     # Snapshot attached forms (freeze Questionnaire + render-ready at point-of-issue)
     for srf in sr.forms:
         # #1043: a Questionnaire attached from request.pdhc's own registry was
@@ -361,17 +446,36 @@ def finalize_service_request(guid, user_guid=None, ip_address=None):
     except diagnosis_review.DiagnosisReviewStepInvalid as e:
         db.session.rollback()
         return {'code': e.code, 'message': str(e)}, 409
+    # #1054: the replaced orders are revoked in the same transaction, each
+    # leaving a version that says by which order.
+    revoked_reviews = []
+    for old in replaced:
+        revoked_reviews += _revoke(old, user_guid,
+                                   f'ersatt av beställning {sr.guid}',
+                                   action='replaced')
     db.session.commit()
 
+    details = {}
+    if children:
+        details['diagnosis_review_guids'] = [c.guid for c in children]
+    if replaced:
+        details['replaced'] = [o.guid for o in replaced]
     log_event(
         user_guid=user_guid,
         action='service_request.finalize',
         resource_type='ServiceRequest',
         resource_guid=sr.guid,
-        details={'diagnosis_review_guids': [c.guid for c in children]}
-        if children else None,
+        data_subject_guid=sr.patient_guid,
+        details=details or None,
         ip_address=ip_address,
     )
+    for old in replaced:
+        log_event(user_guid=user_guid, action='service_request.revoke',
+                  resource_type='ServiceRequest', resource_guid=old.guid,
+                  data_subject_guid=old.patient_guid,
+                  details={'reason': f'replaced by {sr.guid}', 'replaced_by': sr.guid,
+                           'diagnosis_reviews_revoked': [c.guid for c in revoked_reviews]},
+                  ip_address=ip_address)
 
     return sr.to_dict(), 200
 
@@ -383,7 +487,12 @@ def archive_service_request(guid, user_guid=None, ip_address=None):
         return {'code': 'not_found', 'message': 'ServiceRequest not found'}, 404
     if sr.status == 'archived':
         return {'code': 'already_archived', 'message': 'Already archived'}, 400
+    if sr.status in ('revoked', 'entered-in-error'):
+        # #1054: a revoked order stays revoked (it used to become archived).
+        return {'code': 'status_transition_refused',
+                'message': f'A {sr.status} ServiceRequest cannot be archived'}, 409
 
+    note_change(sr, user_guid, 'archived', 'archive')
     sr.status = 'archived'
     db.session.commit()
 
@@ -392,49 +501,146 @@ def archive_service_request(guid, user_guid=None, ip_address=None):
         action='service_request.archive',
         resource_type='ServiceRequest',
         resource_guid=sr.guid,
+        data_subject_guid=sr.patient_guid,
         ip_address=ip_address,
     )
 
     return sr.to_dict(), 200
 
 
-def revoke_service_request(guid, user_guid=None, ip_address=None):
-    """Revoke/cancel a ServiceRequest. Only if no matches are accepted."""
+def _annotate(sr, text, user_guid, kind='note'):
+    """Append a post-draft note (#1054). A NEW list is assigned, so the ORM
+    sees the change (an in-place append to a JSON column is invisible)."""
+    sr.annotations = list(sr.annotations or []) + [{
+        'text': text, 'time': datetime.now(timezone.utc).isoformat(),
+        'author_guid': user_guid, 'kind': kind}]
+
+
+def _revoke(sr, user_guid, reason, action='revoke'):
+    """Revoke `sr` and its open diagnosis reviews; no commit. The reason is
+    recorded as a note on the order (sketch section 6: "Orsak i note") and as the
+    change reason of the version it ends. Returns the revoked reviews."""
+    note_change(sr, user_guid, reason or 'revoked', action)
+    if reason:
+        _annotate(sr, f'Makulerad: {reason}', user_guid, kind='revocation')
+    sr.status = 'revoked'
+    # #984: an order's open diagnosis reviews go with it — a revoked order
+    # must not leave a clinician's task active in icd11.pdhc. Completed ones
+    # are history and stay as they are.
+    from app.services import diagnosis_review
+    with db.session.no_autoflush:
+        open_reviews = ServiceRequest.query.filter(
+            ServiceRequest.based_on_guid == sr.guid,
+            ServiceRequest.kind == diagnosis_review.KIND,
+            ServiceRequest.status.in_(('draft', 'active')),
+        ).all()
+    for child in open_reviews:
+        note_change(child, user_guid, f'order ServiceRequest/{sr.guid} revoked',
+                    'revoke_cascade')
+        child.status = 'revoked'
+        child.fhir_resource = diagnosis_review.build_fhir_resource(child)
+    return open_reviews
+
+
+def revoke_service_request(guid, user_guid=None, ip_address=None, reason=None):
+    """Revoke/cancel (makulera) a ServiceRequest. Only if no matches are
+    accepted. `reason` (#1054) is required for a journal order (one with an
+    encounter) and recorded on the order and its version history."""
     sr = ServiceRequest.query.filter_by(guid=guid).first()
     if not sr:
         return {'code': 'not_found', 'message': 'ServiceRequest not found'}, 404
+    reason = (reason or '').strip() or None
+    if sr.status in ('revoked', 'entered-in-error'):
+        return {'code': 'status_transition_refused',
+                'message': f'ServiceRequest is already {sr.status}'}, 409
 
     accepted = ServiceRequestContractMatch.query.filter_by(
         service_request_guid=guid, status='accepted'
     ).count()
     if accepted > 0:
         return {'code': 'has_accepted', 'message': 'Cannot revoke — has accepted matches'}, 400
+    if sr.encounter_guid and not reason:
+        return {'code': 'revocation_reason_required',
+                'message': 'A journal order is revoked with a reason (makulering).'}, 400
 
-    sr.status = 'revoked'
-    # #984: an order's open diagnosis reviews go with it — a revoked order
-    # must not leave a clinician's task active in icd11.pdhc. Completed ones
-    # are history and stay as they are.
-    from app.services import diagnosis_review
-    open_reviews = ServiceRequest.query.filter(
-        ServiceRequest.based_on_guid == sr.guid,
-        ServiceRequest.kind == diagnosis_review.KIND,
-        ServiceRequest.status.in_(('draft', 'active')),
-    ).all()
-    for child in open_reviews:
-        child.status = 'revoked'
-        child.fhir_resource = diagnosis_review.build_fhir_resource(child)
+    open_reviews = _revoke(sr, user_guid, reason)
     db.session.commit()
 
+    details = {}
+    if open_reviews:
+        details['diagnosis_reviews_revoked'] = [c.guid for c in open_reviews]
+    if reason:
+        details['reason'] = reason
     log_event(
         user_guid=user_guid,
         action='service_request.revoke',
         resource_type='ServiceRequest',
         resource_guid=sr.guid,
-        details={'diagnosis_reviews_revoked': [c.guid for c in open_reviews]}
-        if open_reviews else None,
+        data_subject_guid=sr.patient_guid,
+        details=details or None,
         ip_address=ip_address,
     )
 
+    return sr.to_dict(), 200
+
+
+#: draft-only keys a PATCH may set (#1054); `note` is allowed in every status.
+DRAFT_PATCH_KEYS = frozenset({'notes', 'priority', 'reason', 'encounter_guid', 'encounter',
+                              'supporting_info', 'supportingInfo', 'replaces'})
+PRIORITIES = frozenset({'routine', 'urgent', 'asap', 'stat'})
+
+
+def patch_service_request(guid, payload, user_guid=None, ip_address=None):
+    """#1054: change an order. In draft: the keys in DRAFT_PATCH_KEYS, and
+    `note`. After draft: ONLY `note`, which is APPENDED (author, time) - any
+    other key is 409 service_request_locked with how to replace the order.
+    Status changes have their own routes (finalize / archive / revoke)."""
+    sr = ServiceRequest.query.filter_by(guid=guid).first()
+    if not sr:
+        return {'code': 'not_found', 'message': 'ServiceRequest not found'}, 404
+    if not isinstance(payload, dict) or not payload:
+        return {'code': 'bad_request', 'message': 'a JSON object body is required'}, 400
+    if 'status' in payload:
+        return {'code': 'use_status_route',
+                'message': 'status changes through /finalize, /archive or /revoke'}, 400
+    keys = set(payload) - {'note'}
+    unknown = keys - DRAFT_PATCH_KEYS
+    if sr.status != 'draft' and keys:
+        return _locked(sr, keys)
+    if unknown:
+        return {'code': 'bad_request',
+                'message': f'unknown field(s): {", ".join(sorted(unknown))}'}, 400
+    note = payload.get('note')
+    if note is not None and (not isinstance(note, str) or not note.strip()):
+        return {'code': 'bad_request', 'message': 'note must be non-empty text'}, 400
+
+    fields, err = validate_journal_fields(
+        {k: v for k, v in payload.items() if k in DRAFT_PATCH_KEYS},
+        sr.patient_guid, own_guid=sr.guid)
+    if err:
+        return err
+    if 'priority' in payload:
+        if payload['priority'] not in PRIORITIES:
+            return {'code': 'bad_request',
+                    'message': f'priority must be one of {sorted(PRIORITIES)}'}, 400
+        fields['priority'] = payload['priority']
+    if 'notes' in payload:
+        fields['notes'] = (payload['notes'] or None)
+
+    note_change(sr, user_guid, 'note added' if not fields else 'draft edit',
+                'add_note' if not fields else 'edit_draft')
+    for k, v in fields.items():
+        setattr(sr, k, v)
+    if note is not None:
+        _annotate(sr, note.strip(), user_guid)
+    db.session.commit()
+    log_event(user_guid=user_guid,
+              action='service_request.add_note' if not fields else 'service_request.edit_draft',
+              resource_type='ServiceRequest', resource_guid=sr.guid,
+              data_subject_guid=sr.patient_guid,
+              details={'fields': sorted(fields), 'note_added': note is not None,
+                       'version': sr.version},
+              ip_address=ip_address)
     return sr.to_dict(), 200
 
 
@@ -449,11 +655,18 @@ def check_auto_archive():
 
     count = 0
     for sr in expired:
+        note_change(sr, None, 'validity period ended', 'auto_archive_expired')
         sr.status = 'archived'
         count += 1
 
     if count:
         db.session.commit()
+        # #1054: this status change was the one without an audit row.
+        for sr in expired:
+            log_event(action='service_request.auto_archive',
+                      resource_type='ServiceRequest', resource_guid=sr.guid,
+                      data_subject_guid=sr.patient_guid,
+                      details={'reason': 'period_end_passed'})
 
     return count
 
@@ -469,7 +682,7 @@ def add_form_to_request(sr_guid, form_guid, form_version=None, sort_order=0,
     if not sr:
         return {'code': 'not_found', 'message': 'ServiceRequest not found'}, 404
     if sr.status != 'draft':
-        return {'code': 'invalid_status', 'message': 'Can only add forms in draft status'}, 400
+        return _locked(sr, ['forms'])
 
     existing = ServiceRequestForm.query.filter_by(
         service_request_guid=sr_guid, form_guid=form_guid
@@ -522,7 +735,7 @@ def remove_form_from_request(sr_guid, form_sr_guid, user_guid=None, ip_address=N
     if not sr:
         return {'code': 'not_found', 'message': 'ServiceRequest not found'}, 404
     if sr.status != 'draft':
-        return {'code': 'invalid_status', 'message': 'Can only remove forms in draft status'}, 400
+        return _locked(sr, ['forms'])
 
     srf = ServiceRequestForm.query.filter_by(guid=form_sr_guid, service_request_guid=sr_guid).first()
     if not srf:
@@ -550,7 +763,7 @@ def reorder_forms(sr_guid, ordered_guids, user_guid=None, ip_address=None):
     if not sr:
         return {'code': 'not_found', 'message': 'ServiceRequest not found'}, 404
     if sr.status != 'draft':
-        return {'code': 'invalid_status', 'message': 'Can only reorder forms in draft status'}, 400
+        return _locked(sr, ['forms'])
 
     for idx, fg in enumerate(ordered_guids):
         srf = ServiceRequestForm.query.filter_by(guid=fg, service_request_guid=sr_guid).first()

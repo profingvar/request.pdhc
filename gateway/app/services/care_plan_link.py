@@ -82,7 +82,9 @@ def link_existing(apply: bool = False) -> dict:
         cp, _ = ensure_care_plan(patient_guid=patient, plan_definition_guid=plandef,
                                  snapshot=srs[0].plan_definition_snapshot,
                                  created_by=srs[0].requester_user_guid)
+        from app.services.versioning import note_change
         for sr in srs:
+            note_change(sr, None, f'linked to CarePlan/{cp.guid}', 'link_care_plans')
             sr.care_plan_guid = cp.guid
     if apply:
         db.session.commit()

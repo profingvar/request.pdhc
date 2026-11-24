@@ -151,10 +151,16 @@ def capability_statement():
                 {
                     'type': 'ServiceRequest',
                     'profile': 'http://hl7.org/fhir/StructureDefinition/ServiceRequest',
+                    # #1054: versioned; every change leaves a version
+                    'versioning': 'versioned',
+                    'readHistory': True,
                     'interaction': [
                         {'code': 'read'},
+                        {'code': 'vread'},
+                        {'code': 'history-instance'},
                         {'code': 'search-type'},
                         {'code': 'create'},
+                        {'code': 'patch'},
                     ],
                     'searchParam': [
                         {'name': 'status', 'type': 'token'},
@@ -166,6 +172,23 @@ def capability_statement():
                             'ServiceRequest-update-snapshot',
                             'PUT /api/v1/ServiceRequest/{id}/snapshot',
                             'Update the editable PlanDefinition snapshot (draft only).',
+                        ),
+                        _op(
+                            'ServiceRequest-history',
+                            'GET /api/v1/ServiceRequest/{id}/_history',
+                            'Every version of the order, newest first (Bundle type history, #1054).',
+                        ),
+                        _op(
+                            'ServiceRequest-vread',
+                            'GET /api/v1/ServiceRequest/{id}/_history/{vid}',
+                            'One version of the order as it was (#1054).',
+                        ),
+                        _op(
+                            'ServiceRequest-patch',
+                            'PATCH /api/v1/ServiceRequest/{id}',
+                            ('Draft: edit notes, priority, reason, encounter_guid, supporting_info, '
+                             'replaces. Sent: only {"note": ...}, appended; anything else is 409 '
+                             'service_request_locked - create a replacement with "replaces" (#1054).'),
                         ),
                         _op(
                             'ServiceRequest-finalize',

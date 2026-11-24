@@ -214,6 +214,11 @@ def update_care_plan(guid):
     if refused:
         return refused
     body = request.get_json(silent=True) or {}
+    # #1054: every change leaves the previous version in care_plan_history
+    from app.services.versioning import note_change
+    note_change(cp, get_current_user_guid(),
+                body.get('change_reason') or 'updated: ' + ', '.join(
+                    sorted(k for k in body if k != 'change_reason')), 'update')
     for field in ('status', 'intent', 'title', 'description'):
         if field in body:
             cp.__setattr__(field, body[field])

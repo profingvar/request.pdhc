@@ -403,7 +403,14 @@ class TestCompletion:
     @pytest.mark.parametrize('status', ['draft', 'revoked', 'archived'])
     def test_inactive(self, client, stubs, status):
         _, (c,) = _order(stubs)
-        c.status = status; db.session.commit()
+        # #1054: the ORM refuses active -> draft now, so the state is forced
+        # with a Core UPDATE (which the versioning hook does not see) to keep
+        # testing that completion refuses it.
+        db.session.execute(ServiceRequest.__table__.update()
+                           .where(ServiceRequest.__table__.c.guid == c.guid)
+                           .values(status=status))
+        db.session.commit()
+        db.session.expire_all()
         r = _complete(client, c.guid, CONDS)
         assert r.status_code == 409 and r.get_json()['code'] == 'service_request_not_active'
         assert ServiceRequest.query.filter_by(guid=c.guid).first().status == status
