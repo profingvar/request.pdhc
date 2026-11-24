@@ -247,6 +247,22 @@ SU-admin or org-admin only.
 | GET | `/api/v1/admin/provider-tokens` | List PATs (filter by provider/contract) |
 | DELETE | `/api/v1/admin/provider-tokens/<guid>` | Revoke a PAT |
 
+## 12b) Access log of one patient (#1045)
+
+`GET /api/v1/patients/<guid>/access-log?from=<ISO>&to=<ISO, exclusive>&limit=<n ≤ 5000>`
+
+For dashboard.pdhc's loggkontroll. A PERSON only: the operator's SSO token as
+`X-API-Key`, or a session. A provider PAT or a `service` blob: 403
+`person_required`; not SU/professional: 403 `not_professional`; then
+`patient_access.evaluate` (403 other unit, 404 unknown patient, 502 eps
+unreachable). Rows: `audit_logs` with `data_subject_guid` = the patient, plus
+rows about the patient's ServiceRequests/CarePlans by `resource_guid`, in the
+platform access-log shape. Logged `access_log.read` / `access_log.read.denied`.
+
+Since #1045 an `X-API-Key` caller is the person in `get_current_access_blob()`
+(before: None, so patient gates refused an affiliated professional and audit
+rows had `user_guid` NULL), and `@audit_read` records `data_subject_guid`.
+
 ## 13) Internal — service-to-service
 
 Service-key auth only (`X-Service-Key`). Never exposed externally.

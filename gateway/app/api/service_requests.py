@@ -42,6 +42,7 @@ def sr_patient_gate(verb):
             if sr is not None:
                 decision = patient_access.evaluate(get_current_access_blob(),
                                                    sr.patient_guid)
+                patient_access.note_subject(sr.patient_guid)
                 if not decision.allowed:
                     log_event(user_guid=get_current_user_guid(),
                               action=f'service_request.{verb}.denied',

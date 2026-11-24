@@ -43,6 +43,14 @@ class AccessDecision:
     details: dict = field(default_factory=dict)
 
 
+def note_subject(patient_guid: str | None) -> None:
+    """Record, for this request's `@audit_read` row, which patient the gated
+    route reached (#1045). A no-op outside a request."""
+    from flask import g, has_request_context
+    if patient_guid and has_request_context():
+        g._audit_data_subject_guid = patient_guid
+
+
 def evaluate(blob: dict | None, patient_guid: str) -> AccessDecision:
     is_su = bool(blob.get('is_su_admin', False)) if blob else False
     if is_su:

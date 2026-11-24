@@ -1,5 +1,5 @@
 import requests
-from flask import current_app, session
+from flask import current_app, g, has_app_context, session
 from app import db
 from app.models.dispatch_models import LocalUser
 
@@ -96,6 +96,16 @@ def get_current_access_blob():
             'organization_ids': [],
             'groups': [],
         }
+    # #1045: a caller on `X-API-Key` (dashboard and onboard send the
+    # operator's OWN SSO token there) was validated with sso by
+    # `requires_auth` in THIS request, which stores the blob on `g`. Before,
+    # this function looked only at the session cookie, so for those callers
+    # every patient gate saw None (refused an affiliated professional) and
+    # every audit row recorded user_guid NULL. `g` is per request, so this is
+    # not a cache across requests.
+    api_blob = g.get('api_key_access_blob') if has_app_context() else None
+    if isinstance(api_blob, dict):
+        return api_blob
     token = session.get('sso_token')
     if not token:
         return None

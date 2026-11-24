@@ -88,6 +88,10 @@ def create_app(testing=False):
     from app.api.care_plans import care_plans_bp
     app.register_blueprint(care_plans_bp, url_prefix='/api/v1')
 
+    # #1045: one patient's access log, for a person (loggkontroll).
+    from app.api.access_log import access_log_bp
+    app.register_blueprint(access_log_bp, url_prefix='/api/v1')
+
     from app.api.capability import capability_bp
     app.register_blueprint(capability_bp, url_prefix='/api/v1')
 

@@ -1752,3 +1752,13 @@ Not done / known:
 
 - Operator decision: `patient_guid` on feed items and the `?patient_guid=` filter only for a PAT with scope `patient_generated`. Enforced HERE, where the PAT is validated and the items are built: `expose_patient_guid` defaults off, the route turns it on only for that scope, and the filter from any other PAT (and the dev bypass) is refused 403 `patient_filter_requires_patient_generated`, audited `feed.patient_filter.refused`.
 - Tests through the real route with real PATs: an ordinary PAT's feed is byte-identical to the pre-#1043 shape. 6 mutations each fail. Suite 562 -> 566 passed.
+
+
+## 2026-11-24 — #1045 loggkontroll: a patient's access log for a person (LOCAL, not deployed)
+
+- `GET /api/v1/patients/<guid>/access-log?from&to&limit` (gateway/app/api/access_log.py): `audit_logs` rows with `data_subject_guid` = the patient, plus rows about one of the patient's ServiceRequests/CarePlans by `resource_guid` (older reads carry no subject). Platform access-log shape; dashboard.pdhc merges it.
+- Gate: a PERSON (operator's SSO token on `X-API-Key`, or a session); a provider PAT or a `service` blob -> 403 `person_required`; not SU/professional -> 403 `not_professional`; then `patient_access.evaluate` (the one rule; eps down -> 502, fail closed). Logged `access_log.read` / `access_log.read.denied`.
+- FIXED inline, found doing this: (1) `get_current_access_blob()` read only the session cookie, so for an `X-API-Key` caller (dashboard, onboard: the operator's own token) every patient gate saw None — an affiliated professional was REFUSED `GET /careplans?patient_guid=` (verified by a probe: 403) — and every audit row recorded `user_guid` NULL. It now returns the blob `requires_auth` validated with sso in the same request (`g.api_key_access_blob`; cleared at the start of each `requires_auth`). (2) `@audit_read` wrote no `data_subject_guid`; it now records the patient from the gate (`patient_access.note_subject`), a Patient resource, or `patient_guid`.
+- BEHAVIOUR CHANGE to note at deploy: dashboard's plan panel reads (careplans, ServiceRequests) now succeed for an affiliated professional instead of 403, and onboard/dashboard writes via X-API-Key are now scoped by the operator's units rather than refused by the patient gate.
+- Tests: tests/test_access_log_1045.py (9). Suite 566 -> 575 passed. 9 of 10 mutation controls fail on an assertion; the 10th (dropping the explicit provider-PAT refusal) survives because the next check refuses a PAT anyway (no person blob) — kept as belt and braces.
+- Deploy: code only, no migration, no `.env` key. Recreate the worker with the app (memory: compose run traps).

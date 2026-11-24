@@ -730,3 +730,4 @@ false for 11 files; a hand survey cannot be the gate here.
 - 2026-11-22 #1043 gateway/tests/test_patient_app_1043.py (NEW)
 - 2026-11-22 #1046 gateway/docs/architecture.md, operator-manual.md, api.md
 - 2026-11-22 #1043 feed scoping: gateway/app/api/provider.py, gateway/app/services/provider_feed_service.py, gateway/tests/test_patient_app_1043.py, gateway/docs/architecture.md, api.md, operator-manual.md
+- 2026-11-24 #1045 gateway/app/api/access_log.py (NEW), gateway/app/__init__.py, gateway/app/services/auth_service.py (X-API-Key blob), gateway/app/middleware/auth_middleware.py (clear stale blob), gateway/app/services/audit_service.py (data_subject_guid), gateway/app/services/patient_access.py (note_subject), gateway/app/api/care_plans.py, gateway/app/api/service_requests.py, gateway/tests/test_access_log_1045.py (NEW, 9), gateway/docs/api.md, progress.md, changed_files.md

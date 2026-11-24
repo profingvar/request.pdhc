@@ -78,6 +78,10 @@ def requires_auth(f):
     In AUTH_DISABLED mode, passes through."""
     @wraps(f)
     def decorated(*args, **kwargs):
+        # #1045: get_current_access_blob trusts g.api_key_access_blob, so a
+        # value left on `g` by an earlier request sharing the app context (the
+        # test client inside a pushed context) must never carry over.
+        g.pop('api_key_access_blob', None)
         if current_app.config.get('AUTH_DISABLED'):
             return f(*args, **kwargs)
 

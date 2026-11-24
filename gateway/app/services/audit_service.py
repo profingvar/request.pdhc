@@ -87,6 +87,8 @@ def audit_read(action, *, resource_type=None, guid_arg=None):
                     resource_type=resource_type,
                     resource_guid=resource_guid,
                     ip_address=getattr(request, "remote_addr", None),
+                    data_subject_guid=_resolve_subject(
+                        resource_type, resource_guid, kwargs),
                 )
             except Exception as exc:  # noqa: BLE001
                 try:
@@ -99,6 +101,24 @@ def audit_read(action, *, resource_type=None, guid_arg=None):
             return response
         return wrapper
     return decorator
+
+
+def _resolve_subject(resource_type, resource_guid, view_kwargs):
+    """#1045: the PATIENT a read was about, so a patient's access log can be
+    answered from `data_subject_guid`. Before, `@audit_read` wrote none.
+
+    In order: a patient gate that ran in this request
+    (`g._audit_data_subject_guid`, set by `patient_access.note_subject`); the
+    resource itself when it is a Patient; a `patient_guid` view argument or
+    query argument. Otherwise None (a list across patients)."""
+    from flask import g
+    subject = g.get('_audit_data_subject_guid')
+    if subject:
+        return str(subject)[:36]
+    if resource_type == 'Patient' and resource_guid:
+        return str(resource_guid)[:36]
+    value = (view_kwargs or {}).get('patient_guid') or request.args.get('patient_guid')
+    return str(value)[:36] if value else None
 
 
 def _resolve_status(response):

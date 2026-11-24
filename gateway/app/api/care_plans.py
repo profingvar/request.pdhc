@@ -43,6 +43,7 @@ def _gate(patient_guid, verb, care_plan_guid=None):
     by @audit_read, as the ServiceRequest reads are.
     """
     decision = patient_access.evaluate(get_current_access_blob(), patient_guid)
+    patient_access.note_subject(patient_guid)
     if not decision.allowed:
         log_event(user_guid=get_current_user_guid(),
                   action=f'care_plan.{verb}.denied', resource_type='CarePlan',
