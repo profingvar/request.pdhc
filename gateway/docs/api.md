@@ -318,6 +318,23 @@ unreachable 502; unknown patient 404. Audited `patient_extract` /
 `patient_extract.denied` with `data_subject_guid`, so it shows in the access
 log (12b).
 
+## 12e) Orders made from a medical decision (#1057, record.pdhc stage 5)
+
+record.pdhc creates the follow-up order through `POST /api/v1/ServiceRequest`
+with the professional's own bearer on `X-API-Key`, `supporting_info:
+["ClinicalImpression/<id>/_history/<n>"]`, `encounter_guid` and `reason`
+(fields since #1054). The reverse read:
+
+`GET /api/v1/patients/<patient guid>/ServiceRequest?supporting-info=<Type[/id[/_history/n]]>`
+
+- `supporting-info` is required (400). Matching is by whole path segments, so
+  `ClinicalImpression/<id>` finds every version and not `<id>9`.
+- Gated like other patient reads (`patient_access.evaluate`); a refusal is 403
+  and audited `service_request.by_supporting_info.denied`; a served read is
+  audited `service_request.by_supporting_info`.
+- Every status; spärr-blocked orders are filtered out via eps.
+- Response `{"items": [<order dict>], "total": n}`.
+
 ## 13) Internal — service-to-service
 
 Service-key auth only (`X-Service-Key`). Never exposed externally.

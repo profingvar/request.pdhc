@@ -1787,3 +1787,18 @@ Mutation controls (each restored, sha256 verified): 14 mutations, 13 fail on an 
 Behaviour changes for callers: snapshot/forms edits on sent orders 400→409; revoking an already revoked order 200→409; archiving a revoked order 200→409; a sent order can no longer be deleted or returned to draft; `report_service` no longer sets `notes=''`; SR `to_dict` gains identifier/reason/encounter_guid/replaces/supporting_info/annotations/version (additive); stored `fhir_resource` built at finalize/dispatch gains `identifier` (and the new fields when set); the contained CarePlan omits an empty title. Provider download/feed shapes otherwise unchanged.
 
 Deploy (operator, both tickets together): code + migration `sr_history_1054` (entrypoint runs `flask db upgrade` — NOTE it does `|| echo`, so a failed migration is swallowed and the app starts on the old schema: check `flask db current` = `sr_history_1054` after start). Dump the DB first. Rebuild/overlay app, then re-tag and recreate the worker from the same image (#1011). No `.env` key.
+
+## 2026-11-25 #1057 — orders from a medical decision (record stage 5), local, NOT deployed
+
+- record creates the follow-up order through the existing create route with
+  the professional's bearer and `supporting_info` → the versioned decision
+  (fields since #1054; no migration).
+- New read `GET /api/v1/patients/<g>/ServiceRequest?supporting-info=<ref>`:
+  whole-segment match, patient gate (refusal audited), spärr filter, every
+  status. Operator decision 2026-11-25 (RATIFIED): only a läkare at the
+  patient's unit or an SU orders from a decision — enforced in record, which
+  is the only caller that sets a ClinicalImpression supportingInfo.
+- Suite: 652 passed (was 638). Revert controls (3): segment matching, patient
+  gate, spärr filter — each fails a test.
+- No env, no key. Deploy before record's stage 5 (record degrades by name
+  without it: "kunde inte hämtas från request.pdhc").

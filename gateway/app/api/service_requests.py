@@ -265,6 +265,72 @@ def list_all():
     return jsonify(data), status
 
 
+def supporting_info_matches(refs, wanted):
+    """#1057: does any supportingInfo reference in `refs` name `wanted`?
+
+    `wanted` is a type (`ClinicalImpression`), a resource
+    (`ClinicalImpression/<id>`) or one version of it
+    (`ClinicalImpression/<id>/_history/<n>`). A reference matches when it IS
+    `wanted` or continues it after a `/`, so `ClinicalImpression/<id>` finds
+    every version of that decision and never `ClinicalImpression/<id>9`.
+    Pure."""
+    wanted = (wanted or '').strip().rstrip('/')
+    if not wanted:
+        return False
+    for ref in refs or []:
+        if isinstance(ref, dict):
+            ref = (ref.get('reference') or {})
+            ref = ref.get('reference') if isinstance(ref, dict) else ref
+        if isinstance(ref, str) and (ref == wanted or ref.startswith(wanted + '/')):
+            return True
+    return False
+
+
+@service_requests_bp.route('/patients/<patient_guid>/ServiceRequest', methods=['GET'])
+@requires_auth
+@audit_read('service_request.by_supporting_info', resource_type='ServiceRequest')
+def patient_orders_citing(patient_guid):
+    """#1057 (record.pdhc stage 5): ONE patient's orders that cite a resource
+    in supportingInfo — "which orders were made from this decision".
+
+        GET /api/v1/patients/<patient guid>/ServiceRequest
+            ?supporting-info=ClinicalImpression[/<id>[/_history/<n>]]
+
+    record.pdhc reads the decision -> order link FROM the stored orders (the
+    order carries supportingInfo -> the decision, #1054) instead of keeping a
+    second copy. Every status is returned, drafts and revoked included: a
+    revoked order made from a decision is part of its trace.
+
+    Gate: the same patient rule as every ServiceRequest route
+    (app/services/patient_access.py, #981/#991) — an SU, or a caller whose
+    unit the patient is listed at — then spärr (ips /blocks/check) per order
+    like the list. A refusal is audited with its reason; a served read by
+    @audit_read. `supporting-info` is REQUIRED: this is not a second
+    unscoped list of the patient's orders."""
+    patient_guid = bleach.clean(patient_guid)
+    wanted = (request.args.get('supporting-info') or '').strip()
+    if not wanted:
+        return jsonify({'code': 'bad_request',
+                        'message': 'supporting-info is required'}), 400
+    blob = get_current_access_blob()
+    decision = patient_access.evaluate(blob, patient_guid)
+    patient_access.note_subject(patient_guid)
+    if not decision.allowed:
+        log_event(user_guid=get_current_user_guid(),
+                  action='service_request.by_supporting_info.denied',
+                  resource_type='ServiceRequest', data_subject_guid=patient_guid,
+                  ip_address=request.remote_addr,
+                  details={'reason': decision.reason, **decision.details})
+        return jsonify({'code': decision.code, 'message': decision.reason}), decision.status
+    rows = (ServiceRequest.query.filter_by(patient_guid=patient_guid)
+            .order_by(ServiceRequest.created_at.asc()).all())
+    rows = [sr for sr in rows if supporting_info_matches(sr.supporting_info, wanted)]
+    if rows:
+        from app.services import ips_client
+        rows = ips_client.filter_visible_srs(rows)
+    return jsonify({'items': [sr.to_dict() for sr in rows], 'total': len(rows)}), 200
+
+
 @service_requests_bp.route('/ServiceRequest/<guid>', methods=['GET'])
 @requires_auth
 @audit_read('service_request.read', resource_type='ServiceRequest', guid_arg='guid')
